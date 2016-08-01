@@ -1,8 +1,13 @@
 package com.sourcegraph.langp.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class HoverContent {
 
+    @JsonProperty(value="Type")
     private String type;
+
+    @JsonProperty(value="Value")
     private String value;
 
     public HoverContent() {

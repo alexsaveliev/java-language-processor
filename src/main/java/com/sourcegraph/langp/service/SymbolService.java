@@ -4,9 +4,7 @@ import com.sourcegraph.langp.javac.ShortTypePrinter;
 import com.sourcegraph.langp.javac.SymbolIndex;
 import com.sourcegraph.langp.javac.SymbolUnderCursorVisitor;
 import com.sourcegraph.langp.javac.Workspace;
-import com.sourcegraph.langp.model.Hover;
-import com.sourcegraph.langp.model.HoverContent;
-import com.sourcegraph.langp.model.Position;
+import com.sourcegraph.langp.model.*;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import org.slf4j.Logger;
@@ -238,6 +236,90 @@ public class SymbolService {
                     position.getFile(),
                     position.getLine(),
                     position.getCharacter(),
+                    e);
+            throw new SymbolException(e.getMessage());
+        }
+    }
+
+    public LocalRefs localRefs(Position position) throws WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
+
+        LOGGER.info("Local refs {}:{}/{} {}:{}",
+                position.getRepo(),
+                position.getCommit(),
+                position.getFile(),
+                position.getLine(),
+                position.getCharacter());
+
+        Path root = workspaceService.getWorkspace(position.getRepo(), position.getCommit()).toPath();
+        Workspace workspace = Workspace.getInstance(root);
+
+        Path sourceFile = root.resolve(position.getFile());
+        if (!sourceFile.startsWith(root)) {
+            throw new SymbolException("File is outside of workspace");
+        }
+        if (!sourceFile.toFile().isFile()) {
+            throw new SymbolException("File does not exist");
+        }
+
+        LocalRefs ret = new LocalRefs();
+        ret.setRefs(new LinkedList<>());
+        try {
+            JCTree.JCCompilationUnit tree = workspace.getTree(sourceFile);
+            JavaFileObject file = workspace.getFile(sourceFile);
+            long cursor = findOffset(file, position.getLine(), position.getCharacter());
+            SymbolUnderCursorVisitor visitor = new SymbolUnderCursorVisitor(file,
+                    cursor,
+                    workspace.findCompiler(sourceFile).context);
+            tree.accept(visitor);
+
+            if (visitor.found.isPresent()) {
+                SymbolIndex index = workspace.findIndex(sourceFile);
+                if (index == null) {
+                    throw new NoDefinitionFoundException();
+                }
+                position = index.findSymbol(visitor.found.get());
+                if (position == null) {
+                    throw new NoDefinitionFoundException();
+                }
+                ret.getRefs().add(position);
+                index.references(visitor.found.get()).forEach(ret.getRefs()::add);
+                return ret;
+            } else {
+                throw new NoDefinitionFoundException();
+            }
+        } catch (NoDefinitionFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.info("An error occurred while looking for local refs {}:{}/{} {}:{}",
+                    position.getRepo(),
+                    position.getCommit(),
+                    position.getFile(),
+                    position.getLine(),
+                    position.getCharacter(),
+                    e);
+            throw new SymbolException(e.getMessage());
+        }
+    }
+
+    public ExternalRefs externalRefs(RepoRev repoRev) throws WorkspaceException,
+            SymbolException {
+
+        LOGGER.info("External refs {}:{}",
+                repoRev.getRepo(),
+                repoRev.getCommit());
+        try {
+            Path root = workspaceService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
+            Workspace workspace = Workspace.getInstance(root);
+            workspace.computeIndexes();
+            ExternalRefs ret = new ExternalRefs();
+            ret.setDefs(workspace.getExternalDefs());
+            return ret;
+        } catch (Exception e) {
+            LOGGER.info("An error occurred while looking for external refs {}:{}",
+                    repoRev.getRepo(),
+                    repoRev.getCommit(),
                     e);
             throw new SymbolException(e.getMessage());
         }

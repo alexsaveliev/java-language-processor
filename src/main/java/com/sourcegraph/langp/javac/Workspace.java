@@ -1,11 +1,15 @@
 package com.sourcegraph.langp.javac;
 
+import com.sourcegraph.langp.config.builder.ScanUtil;
+import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
 import com.sun.tools.javac.tree.JCTree;
 
 import javax.tools.JavaFileObject;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,6 +23,8 @@ public class Workspace {
     private Map<Path, JavacConfig> configCache = new ConcurrentHashMap<>();
 
     private Map<JavacConfig, JavacHolder> compilerCache = new ConcurrentHashMap<>();
+
+    private Collection<DefSpec> externalDefs = ConcurrentHashMap.newKeySet();
 
     /**
      * Instead of looking for javaconfig.json and creating a JavacHolder, just use this.
@@ -77,7 +83,7 @@ public class Workspace {
     }
 
     private SymbolIndex newIndex(JavacConfig c) {
-        return new SymbolIndex(c, root);
+        return new SymbolIndex(c, root, this);
     }
 
 
@@ -121,5 +127,16 @@ public class Workspace {
 
     public JavaFileObject getFile(Path path) {
         return findCompiler(path).fileManager.getRegularFile(path.toFile());
+    }
+
+    public Collection<DefSpec> getExternalDefs() {
+        return externalDefs;
+    }
+
+    public void computeIndexes() throws IOException {
+        Collection<Path> configs = ScanUtil.findMatchingFiles(root, JavacConfig.CONFIG_FILE_NAME);
+        for (Path config : configs) {
+            findIndex(config);
+        }
     }
 }

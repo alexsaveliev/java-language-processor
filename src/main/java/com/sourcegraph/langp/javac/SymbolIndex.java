@@ -1,17 +1,21 @@
 package com.sourcegraph.langp.javac;
 
+import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
 import com.sourcegraph.langp.model.Position;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeInfo;
+import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.Name;
 
+import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
 import java.io.IOException;
+import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -21,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 public class SymbolIndex {
     private static final Logger LOG = Logger.getLogger("main");
@@ -32,7 +37,7 @@ public class SymbolIndex {
 
     private static class SourceFileIndex {
         private final EnumMap<ElementKind, Map<String, Position>> declarations = new EnumMap<>(ElementKind.class);
-        //private final EnumMap<ElementKind, Map<String, Set<Location>>> references = new EnumMap<>(ElementKind.class);
+        private final EnumMap<ElementKind, Map<String, Set<Position>>> references = new EnumMap<>(ElementKind.class);
     }
 
     /**
@@ -47,79 +52,56 @@ public class SymbolIndex {
 
     private URI root;
 
+    private Workspace workspace;
+
     @FunctionalInterface
     public interface ReportDiagnostics {
         void report(Collection<Path> paths, DiagnosticCollector<JavaFileObject> diagnostics);
     }
 
     public SymbolIndex(JavacConfig config,
-                       Path root) {
+                       Path root,
+                       Workspace workspace) {
 
         if (root != null) {
             this.root = root.toUri();
         }
 
+        this.workspace = workspace;
+
         JavacHolder compiler = new JavacHolder(config);
         Indexer indexer = new Indexer(compiler.context);
 
-        Thread worker = new Thread("InitialIndex") {
-            List<JCTree.JCCompilationUnit> parsed = new ArrayList<>();
-            List<Path> paths = new ArrayList<>();
+        List<JCTree.JCCompilationUnit> parsed = new ArrayList<>();
+        List<Path> paths = new ArrayList<>();
 
-            @Override
-            public void run() {
-                // Parse each file
-                config.sources.forEach(s -> parseAll(Paths.get(s), parsed, paths));
+        // Parse each file
+        config.sources.forEach(s -> parseAll(compiler, Paths.get(s), parsed, paths));
 
-                // Compile all parsed files
-                compiler.compile(parsed);
+        // Compile all parsed files
+        compiler.compile(parsed);
 
-                parsed.forEach(p -> p.accept(indexer));
+        parsed.forEach(p -> p.accept(indexer));
 
-                // TODO minimize memory use during this process
-                // Instead of doing parse-all / compile-all, 
-                // queue all files, then do parse / compile on each
-                // If invoked correctly, javac should avoid reparsing the same file twice
-                // Then, use the same mechanism as the desugar / generate phases to remove method bodies, 
-                // to reclaim memory as we go
-                initialIndexComplete.complete(null);
+        // TODO minimize memory use during this process
+        // Instead of doing parse-all / compile-all,
+        // queue all files, then do parse / compile on each
+        // If invoked correctly, javac should avoid reparsing the same file twice
+        // Then, use the same mechanism as the desugar / generate phases to remove method bodies,
+        // to reclaim memory as we go
+        initialIndexComplete.complete(null);
 
-                // TODO verify that compiler and all its resources get destroyed
-            }
-
-            /**
-             * Look for .java files and invalidate them
-             */
-            private void parseAll(Path path, List<JCTree.JCCompilationUnit> trees, List<Path> paths) {
-                if (Files.isDirectory(path)) try {
-                    Files.list(path).forEach(p -> parseAll(p, trees, paths));
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-                else if (path.getFileName().toString().endsWith(".java")) {
-                    LOG.info("Index " + path);
-
-                    JavaFileObject file = compiler.fileManager.getRegularFile(path.toFile());
-
-                    trees.add(compiler.parse(file));
-                    paths.add(path);
-                }
-            }
-        };
-
-        worker.start();
+        // TODO verify that compiler and all its resources get destroyed
     }
 
-    // TODO
-    /*
-    public Stream<? extends Location> references(Symbol symbol) {
+    public Stream<? extends Position> references(Symbol symbol) {
         // For indexed symbols, just look up the precomputed references
         if (shouldIndex(symbol)) {
             String key = uniqueName(symbol);
 
             return sourcePath.values().stream().flatMap(f -> {
-                Map<String, Set<Location>> bySymbol = f.references.getOrDefault(symbol.getKind(), Collections.emptyMap());
-                Set<Location> locations = bySymbol.getOrDefault(key, Collections.emptySet());
+                Map<String, Set<Position>> bySymbol = f.references.getOrDefault(symbol.getKind(), Collections.emptyMap());
+                Set<Position> locations = bySymbol.getOrDefault(key, Collections.emptySet());
 
                 return locations.stream();
             });
@@ -127,7 +109,7 @@ public class SymbolIndex {
         // For non-indexed symbols, scan the active set
         else {
             return activeDocuments.values().stream().flatMap(compilationUnit -> {
-                List<LocationImpl> references = new ArrayList<>();
+                Collection<Position> references = new LinkedList<>();
 
                 compilationUnit.accept(new TreeScanner() {
                     @Override
@@ -135,7 +117,7 @@ public class SymbolIndex {
                         super.visitSelect(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(location(tree, compilationUnit));
+                            references.add(position(tree, compilationUnit));
                     }
 
                     @Override
@@ -143,7 +125,7 @@ public class SymbolIndex {
                         super.visitReference(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(location(tree, compilationUnit));
+                            references.add(position(tree, compilationUnit));
                     }
 
                     @Override
@@ -151,7 +133,7 @@ public class SymbolIndex {
                         super.visitIdent(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(location(tree, compilationUnit));
+                            references.add(position(tree, compilationUnit));
                     }
                 });
 
@@ -160,7 +142,6 @@ public class SymbolIndex {
             });
         }
     }
-    */
 
     public Position findSymbol(Symbol symbol) {
         ElementKind kind = symbol.getKind();
@@ -251,7 +232,7 @@ public class SymbolIndex {
         }
 
         private void addDeclaration(JCTree tree, Symbol symbol) {
-            if (symbol != null && onSourcePath(symbol) && shouldIndex(symbol)) {
+            if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
                 Position position = position(tree, compilationUnit);
                 Map<String, Position> withKind = index.declarations.computeIfAbsent(symbol.getKind(), newKind -> new HashMap<>());
@@ -260,17 +241,20 @@ public class SymbolIndex {
         }
 
         private void addReference(JCTree tree, Symbol symbol) {
-            // TODO
-            /*
-            if (symbol != null && onSourcePath(symbol) && shouldIndex(symbol)) {
+            if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
-                Map<String, Set<Location>> withKind = index.references.computeIfAbsent(symbol.getKind(), newKind -> new HashMap<>());
-                Set<Location> locations = withKind.computeIfAbsent(key, newName -> new HashSet<>());
-                LocationImpl location = location(tree, compilationUnit);
-
-                locations.add(location);
+                JavaFileObject externalOrigin = getExternalOrigin(symbol);
+                if (externalOrigin == null) {
+                    Map<String, Set<Position>> withKind = index.references.computeIfAbsent(symbol.getKind(), newKind -> new HashMap<>());
+                    Set<Position> positions = withKind.computeIfAbsent(key, newName -> new HashSet<>());
+                    Position position = position(tree, compilationUnit);
+                    positions.add(position);
+                } else {
+                    DefSpec def = new DefSpec();
+                    def.setPath(key);
+                    workspace.getExternalDefs().add(def);
+                }
             }
-            */
         }
     }
 
@@ -307,32 +291,21 @@ public class SymbolIndex {
                 Symbol.ClassSymbol symbol = ((JCTree.JCClassDecl) tree).sym;
                 offset = offset(compilationUnit, symbol, offset);
                 end = offset + symbol.name.length();
-            }
-            else if (tree instanceof JCTree.JCMethodDecl) {
+            } else if (tree instanceof JCTree.JCMethodDecl) {
                 Symbol.MethodSymbol symbol = ((JCTree.JCMethodDecl) tree).sym;
                 offset = offset(compilationUnit, symbol, offset);
                 end = offset + symbol.name.length();
-            }
-            else if (tree instanceof JCTree.JCVariableDecl) {
+            } else if (tree instanceof JCTree.JCVariableDecl) {
                 Symbol.VarSymbol symbol = ((JCTree.JCVariableDecl) tree).sym;
                 offset = offset(compilationUnit, symbol, offset);
                 end = offset + symbol.name.length();
             }
-            // TODO
-            /*
-            RangeImpl position = JavaLanguageServer.findPosition(compilationUnit.getSourceFile(),
-                                                                 offset,
-                                                                 end);
-            LocationImpl location = new LocationImpl();
 
+            Position range[] = findPosition(compilationUnit.getSourceFile(), offset, end);
             URI full = compilationUnit.getSourceFile().toUri();
             String uri = root.relativize(full).toString();
-            location.setUri(uri);
-            location.setRange(position);
-
-            return location;
-            */
-            return null;
+            range[0].setFile(uri);
+            return range[0];
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -395,8 +368,38 @@ public class SymbolIndex {
         return -1;
     }
 
-    private static boolean onSourcePath(Symbol symbol) {
-        return true; // TODO
+    /**
+     *
+     * @param symbol symbol
+     * @return file object if symbol refers to external artifact (comes from classpath, not sourcepath) or null
+     */
+    private static JavaFileObject getExternalOrigin(Symbol symbol) {
+        Symbol.ClassSymbol classSymbol = forElement(symbol);
+        if (classSymbol == null) {
+            return null;
+        }
+        if (classSymbol.sourcefile == null) {
+            return classSymbol.classfile;
+        }
+        if (classSymbol.sourcefile.toUri().isAbsolute()) {
+            return null;
+        }
+        return classSymbol.classfile;
+    }
+
+    private static Symbol.ClassSymbol forElement(Element e) {
+        if (e == null) {
+            return null;
+        }
+        switch (e.getKind()) {
+            case CLASS:
+            case INTERFACE:
+            case ENUM:
+            case ANNOTATION_TYPE:
+                return  (Symbol.ClassSymbol) e;
+            default:
+                return forElement(e.getEnclosingElement());
+        }
     }
 
     private static String uniqueName(Symbol s) {
@@ -462,4 +465,80 @@ public class SymbolIndex {
     public JCTree.JCCompilationUnit get(URI sourceFile) {
         return activeDocuments.get(sourceFile);
     }
+
+    private static Position[] findPosition(JavaFileObject file, long startOffset, long endOffset) throws IOException {
+        try (Reader in = file.openReader(true)) {
+            long offset = 0;
+            int line = 0;
+            int character = 0;
+
+            // Find the start position
+            while (offset < startOffset) {
+                int next = in.read();
+
+                if (next < 0)
+                    break;
+                else {
+                    offset++;
+                    character++;
+
+                    if (next == '\n') {
+                        line++;
+                        character = 0;
+                    }
+                }
+            }
+
+            Position start = new Position();
+            start.setLine(line);
+            start.setCharacter(character);
+
+            // Find the end position
+            while (offset < endOffset) {
+                int next = in.read();
+
+                if (next < 0)
+                    break;
+                else {
+                    offset++;
+                    character++;
+
+                    if (next == '\n') {
+                        line++;
+                        character = 0;
+                    }
+                }
+            }
+
+            Position end = new Position();
+            end.setLine(line);
+            end.setCharacter(character);
+
+            return new Position[]{start, end};
+        }
+    }
+
+    /**
+     * Look for .java files and invalidate them
+     */
+    private void parseAll(JavacHolder compiler,
+                          Path path,
+                          List<JCTree.JCCompilationUnit> trees,
+                          List<Path> paths) {
+        if (Files.isDirectory(path)) try {
+            Files.list(path).forEach(p -> parseAll(compiler, p, trees, paths));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        else if (path.getFileName().toString().endsWith(".java")) {
+            LOG.info("Index " + path);
+
+            JavaFileObject file = compiler.fileManager.getRegularFile(path.toFile());
+
+            trees.add(compiler.parse(file));
+            paths.add(path);
+        }
+    }
+
+
 }

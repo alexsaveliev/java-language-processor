@@ -1,28 +1,17 @@
 package com.sourcegraph.langp.model;
 
-public class Position {
+import com.fasterxml.jackson.annotation.JsonProperty;
 
-    private String repo;
-    private String commit;
+public class Position extends RepoRev {
+
+    @JsonProperty(value = "File")
     private String file;
+
+    @JsonProperty(value = "Line")
     private int line;
+
+    @JsonProperty(value = "Character")
     private int character;
-
-    public String getRepo() {
-        return repo;
-    }
-
-    public void setRepo(String repo) {
-        this.repo = repo;
-    }
-
-    public String getCommit() {
-        return commit;
-    }
-
-    public void setCommit(String commit) {
-        this.commit = commit;
-    }
 
     public String getFile() {
         return file;

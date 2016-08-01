@@ -12,7 +12,7 @@ import java.util.HashSet;
 /**
  * File scan utilities
  */
-class ScanUtil {
+public class ScanUtil {
 
     private ScanUtil() {
     }
@@ -24,7 +24,7 @@ class ScanUtil {
      * @return found files
      * @throws IOException
      */
-    static Collection<Path> findMatchingFiles(Path root, String fileName) throws IOException {
+    public static Collection<Path> findMatchingFiles(Path root, String fileName) throws IOException {
         Collection<Path> result = new HashSet<>();
 
         Files.walkFileTree(root, new SimpleFileVisitor<Path>() {

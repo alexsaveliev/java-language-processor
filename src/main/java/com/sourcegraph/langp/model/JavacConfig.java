@@ -14,7 +14,7 @@ public class JavacConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JavacConfig.class);
 
-    private static final String CONFIG_FILE_NAME = ".jconfig.json";
+    public static final String CONFIG_FILE_NAME = ".jconfig.json";
 
     private static Gson gson;
 

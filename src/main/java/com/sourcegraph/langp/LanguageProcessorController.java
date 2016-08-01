@@ -1,9 +1,7 @@
 package com.sourcegraph.langp;
 
+import com.sourcegraph.langp.model.*;
 import com.sourcegraph.langp.model.Error;
-import com.sourcegraph.langp.model.Hover;
-import com.sourcegraph.langp.model.LocalRefs;
-import com.sourcegraph.langp.model.Position;
 import com.sourcegraph.langp.service.NoDefinitionFoundException;
 import com.sourcegraph.langp.service.SymbolException;
 import com.sourcegraph.langp.service.SymbolService;
@@ -39,11 +37,18 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/local-refs")
-    public LocalRefs localRefs(@RequestBody Position position) {
-        return null;
+    public LocalRefs localRefs(@RequestBody Position pos)
+            throws WorkspaceException, SymbolException, NoDefinitionFoundException {
+        return symbolService.localRefs(pos);
     }
 
-    @ExceptionHandler({SymbolException.class, WorkspaceException.class, NoDefinitionFoundException.class})
+    @PostMapping(value = "/external-refs")
+    public ExternalRefs externalRefs(@RequestBody RepoRev repoRev)
+            throws WorkspaceException, SymbolException {
+        return symbolService.externalRefs(repoRev);
+    }
+
+    @ExceptionHandler({Exception.class})
     @ResponseBody
     ResponseEntity<Error> handleError(HttpServletResponse response, Exception ex) throws IOException {
         Error error = new Error(ex.getMessage());

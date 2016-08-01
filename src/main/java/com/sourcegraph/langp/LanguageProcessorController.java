@@ -1,11 +1,8 @@
 package com.sourcegraph.langp;
 
-import com.sourcegraph.langp.model.*;
 import com.sourcegraph.langp.model.Error;
-import com.sourcegraph.langp.service.NoDefinitionFoundException;
-import com.sourcegraph.langp.service.SymbolException;
-import com.sourcegraph.langp.service.SymbolService;
-import com.sourcegraph.langp.service.WorkspaceException;
+import com.sourcegraph.langp.model.*;
+import com.sourcegraph.langp.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +20,16 @@ public class LanguageProcessorController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LanguageProcessorController.class);
 
     @Autowired
+    private WorkspaceService workspaceService;
+
+    @Autowired
     private SymbolService symbolService;
+
+    @PostMapping(value = "/prepare")
+    public void prepare(@RequestBody PrepareSpec prepareSpec)
+            throws WorkspaceException {
+        workspaceService.getWorkspace(prepareSpec.getRepo(), prepareSpec.getCommit(), prepareSpec.isForce());
+    }
 
     @PostMapping(value = "/definition")
     public Position definition(@RequestBody Position pos)

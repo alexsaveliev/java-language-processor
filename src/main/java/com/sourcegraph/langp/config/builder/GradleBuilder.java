@@ -100,6 +100,7 @@ public class GradleBuilder {
         Map<String, Project> ret = new HashMap<>();
         for (Project project : projects) {
             ret.put(project.groupId + '/' + project.artifactId, project);
+            visited.add(Paths.get(project.descriptor).toAbsolutePath().normalize());
         }
         return ret;
     }
@@ -228,6 +229,12 @@ public class GradleBuilder {
                                     continue;
                                 }
                                 project.outputDir = payload;
+                                break;
+                            case "SRCLIB-GRADLEFILE":
+                                if (project == null) {
+                                    continue;
+                                }
+                                project.descriptor = payload;
                                 break;
                             default:
                                 LOGGER.debug("gradle: {}", line);
@@ -432,6 +439,7 @@ public class GradleBuilder {
         Collection<Dependency> dependencies = new LinkedList<>();
         Collection<SourcePathElement> sourceDirs = new LinkedList<>();
         String outputDir;
+        String descriptor;
 
         String id() {
             return groupId + '/' + artifactId;

@@ -147,7 +147,9 @@ allprojects {
             println "SRCLIB-ARTIFACT $project.name"
             println "SRCLIB-GROUP $project.group"
             println "SRCLIB-PROJECTDIR $project.projectDir.absolutePath"
-
+            if (project.buildFile) {
+                println "SRCLIB-GRADLEFILE $project.buildFile.absolutePath"
+            }
 
             boolean android = false
             boolean androidSupportFramework = false

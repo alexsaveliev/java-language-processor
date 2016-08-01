@@ -19,6 +19,7 @@ repositories {
     jcenter()
     maven { url "http://repo.spring.io/snapshot" }
     maven { url "http://repo.spring.io/milestone" }
+    maven { url "https://repo.eclipse.org/content/groups/releases/" }
 }
 
 dependencies {
@@ -36,6 +37,7 @@ dependencies {
 
     compile 'com.google.code.gson:gson:2.3'
 
+    compile 'org.eclipse.jgit:org.eclipse.jgit:4.4.1.201607150455-r'
     compile files("${System.properties['java.home']}/../lib/tools.jar")
 
 }

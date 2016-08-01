@@ -1,6 +1,10 @@
 package com.sourcegraph.langp.service;
 
-import org.apache.commons.lang3.StringUtils;
+import org.eclipse.jgit.api.CloneCommand;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,24 +28,35 @@ public class WorkspaceService {
     private File root;
 
     public File getWorkspace(String repo, String commit) throws WorkspaceException {
+        return getWorkspace(repo, commit, false);
+    }
+
+    public File getWorkspace(String repo, String commit, boolean force) throws WorkspaceException {
         File workspace = new File(new File(root, repo), commit);
+        boolean cloneNeeded = true;
         if (workspace.isDirectory()) {
-            return workspace;
+            if (force) {
+                cloneNeeded = false;
+            } else {
+                return workspace;
+            }
         }
-        if (workspace.exists()) {
+        if (workspace.isFile()) {
             throw new WorkspaceException(workspace + " does not denote a directory");
         }
-        if (!workspace.getParentFile().mkdirs()) {
+        if (!workspace.getParentFile().exists() && !workspace.getParentFile().mkdirs()) {
             throw new WorkspaceException("Unable to create parent directory " + workspace.getParent());
         }
-        LOGGER.info("Cloning {} into {}", repo, workspace);
-        if (!exec(workspace.getParentFile(), "git", "clone", "https://" + repo, commit)) {
-            throw new WorkspaceException("Unable to clone " + repo);
-        }
-        if (!exec(workspace, "git", "reset", "--hard", commit)) {
-            throw new WorkspaceException("Unable to fetch commit " + commit);
+        if (cloneNeeded) {
+            LOGGER.info("Cloning {} into {}", repo, workspace);
+            if (!clone("https://" + repo, workspace)) {
+                throw new WorkspaceException("Unable to clone " + repo);
+            }
         }
 
+        if (!reset(workspace, commit)) {
+            throw new WorkspaceException("Unable to fetch commit " + commit);
+        }
         configurationService.configure(workspace);
         return workspace;
     }
@@ -59,15 +74,32 @@ public class WorkspaceService {
         LOGGER.info("Using workspace {}", root.getAbsolutePath());
     }
 
-    private boolean exec(File cwd, String... cmd) {
+    private boolean clone(String uri, File destination) {
+        CloneCommand clone = Git.cloneRepository();
         try {
-            Process p = Runtime.getRuntime().exec(cmd, null, cwd);
-            return p.waitFor() == 0;
-        } catch (Exception ex) {
-            LOGGER.error("An error occurred while running [{}] in {}", StringUtils.join(cmd, ' '), cwd, ex);
+            clone.setURI(uri).setDirectory(destination);
+            clone.call().getRepository().close();
+            return true;
+        } catch (Exception e) {
+            LOGGER.error("An error occurred while cloning {} into {}", uri, destination, e);
             return false;
         }
     }
 
+    private boolean reset(File repoDir, String commit) {
+        FileRepositoryBuilder builder = new FileRepositoryBuilder();
+        try (Repository repository = builder.setGitDir(new File(repoDir, ".git")).
+                readEnvironment(). // scan environment GIT_* variables
+                findGitDir(). // scan up the file system tree
+                build()) {
+            Git git = new Git(repository);
+            ResetCommand reset = git.reset();
+            reset.setRef(commit).setMode(ResetCommand.ResetType.HARD).call();
+            return true;
+        } catch (Exception e) {
+            LOGGER.error("An error occurred while resetting {} to {}", repoDir, commit, e);
+            return false;
+        }
+    }
 
 }

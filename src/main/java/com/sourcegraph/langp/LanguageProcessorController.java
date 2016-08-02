@@ -25,33 +25,56 @@ public class LanguageProcessorController {
     @Autowired
     private SymbolService symbolService;
 
-    @PostMapping(value = "/prepare")
-    public void prepare(@RequestBody PrepareSpec prepareSpec)
-            throws WorkspaceException {
-        workspaceService.getWorkspace(prepareSpec.getRepo(), prepareSpec.getCommit(), prepareSpec.isForce());
-    }
-
     @PostMapping(value = "/definition")
     public Range definition(@RequestBody Position pos)
-            throws WorkspaceException, SymbolException, NoDefinitionFoundException {
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
         return symbolService.definition(pos);
     }
 
     @PostMapping(value = "/hover")
-    public Hover hover(@RequestBody Position pos) throws WorkspaceException, SymbolException {
+    public Hover hover(@RequestBody Position pos)
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
+            SymbolException {
         return symbolService.hover(pos);
     }
 
     @PostMapping(value = "/local-refs")
     public LocalRefs localRefs(@RequestBody Position pos)
-            throws WorkspaceException, SymbolException, NoDefinitionFoundException {
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
         return symbolService.localRefs(pos);
     }
 
     @PostMapping(value = "/external-refs")
     public ExternalRefs externalRefs(@RequestBody RepoRev repoRev)
-            throws WorkspaceException, SymbolException {
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
+            SymbolException {
         return symbolService.externalRefs(repoRev);
+    }
+
+    @ExceptionHandler({WorkspaceBeingConfiguredException.class})
+    @ResponseBody
+    ResponseEntity<Error> handleWorkspaceBeingConfiguredException(HttpServletResponse response) throws IOException {
+        Error error = new Error("Workspace being configured...");
+        return new ResponseEntity<>(error, HttpStatus.ACCEPTED);
+    }
+
+    @ExceptionHandler({WorkspaceBeingClonedException.class})
+    @ResponseBody
+    ResponseEntity<Error> handleWorkspaceBeingClonedException(HttpServletResponse response) throws IOException {
+        Error error = new Error("Workspace being cloned...");
+        return new ResponseEntity<>(error, HttpStatus.ACCEPTED);
     }
 
     @ExceptionHandler({Exception.class})

@@ -31,7 +31,11 @@ public class SymbolService {
 
     private Map<String, Long> offsets = new HashMap<>();
 
-    public Hover hover(Position position) throws WorkspaceException, SymbolException {
+    public Hover hover(Position position)
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
+            SymbolException {
 
         LOGGER.info("Hover {}:{}/{} {}:{}",
                 position.getRepo(),
@@ -133,57 +137,10 @@ public class SymbolService {
         return result;
     }
 
-    private long findOffset(JavaFileObject file, int targetLine, int targetCharacter) {
-        String id = file.getName() + ':' + targetLine + ':' + targetCharacter;
-        Long offset = offsets.get(id);
-        if (offset == null) {
-            try {
-                offsets.put(id, offset = computeOffset(file, targetLine, targetCharacter));
-            } catch (IOException ex) {
-                LOGGER.warn("Cannot compute offset for {}", file, ex);
-                offsets.put(id, offset = 0L);
-            }
-        }
-        return offset;
-    }
-
-    private long computeOffset(JavaFileObject file,
-                               int targetLine,
-                               int targetCharacter) throws IOException {
-        try (Reader in = file.openReader(true)) {
-            long offset = 0;
-            int line = 0;
-            int character = 0;
-
-            while (line < targetLine) {
-                int next = in.read();
-
-                if (next < 0)
-                    return offset;
-                else {
-                    offset++;
-
-                    if (next == '\n')
-                        line++;
-                }
-            }
-
-            while (character < targetCharacter) {
-                int next = in.read();
-
-                if (next < 0)
-                    return offset;
-                else {
-                    offset++;
-                    character++;
-                }
-            }
-
-            return offset;
-        }
-    }
-
-    public Range definition(Position position) throws WorkspaceException,
+    public Range definition(Position position) throws
+            WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
 
@@ -241,7 +198,10 @@ public class SymbolService {
         }
     }
 
-    public LocalRefs localRefs(Position position) throws WorkspaceException,
+    public LocalRefs localRefs(Position position) throws
+            WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
 
@@ -322,6 +282,56 @@ public class SymbolService {
                     repoRev.getCommit(),
                     e);
             throw new SymbolException(e.getMessage());
+        }
+    }
+
+    private long findOffset(JavaFileObject file, int targetLine, int targetCharacter) {
+        String id = file.getName() + ':' + targetLine + ':' + targetCharacter;
+        Long offset = offsets.get(id);
+        if (offset == null) {
+            try {
+                offsets.put(id, offset = computeOffset(file, targetLine, targetCharacter));
+            } catch (IOException ex) {
+                LOGGER.warn("Cannot compute offset for {}", file, ex);
+                offsets.put(id, offset = 0L);
+            }
+        }
+        return offset;
+    }
+
+    private long computeOffset(JavaFileObject file,
+                               int targetLine,
+                               int targetCharacter) throws IOException {
+        try (Reader in = file.openReader(true)) {
+            long offset = 0;
+            int line = 0;
+            int character = 0;
+
+            while (line < targetLine) {
+                int next = in.read();
+
+                if (next < 0)
+                    return offset;
+                else {
+                    offset++;
+
+                    if (next == '\n')
+                        line++;
+                }
+            }
+
+            while (character < targetCharacter) {
+                int next = in.read();
+
+                if (next < 0)
+                    return offset;
+                else {
+                    offset++;
+                    character++;
+                }
+            }
+
+            return offset;
         }
     }
 }

@@ -7,13 +7,13 @@ import java.util.Collection;
 public class LocalRefs {
 
     @JsonProperty(value="Refs")
-    private Collection<Position> refs;
+    private Collection<Range> refs;
 
-    public Collection<Position> getRefs() {
+    public Collection<Range> getRefs() {
         return refs;
     }
 
-    public void setRefs(Collection<Position> refs) {
+    public void setRefs(Collection<Range> refs) {
         this.refs = refs;
     }
 }

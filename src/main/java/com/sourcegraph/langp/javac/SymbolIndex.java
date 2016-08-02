@@ -2,13 +2,15 @@ package com.sourcegraph.langp.javac;
 
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
-import com.sourcegraph.langp.model.Position;
+import com.sourcegraph.langp.model.Range;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.Name;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -22,22 +24,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 public class SymbolIndex {
-    private static final Logger LOG = Logger.getLogger("main");
 
-    /**
-     * Completes when initial index is done. Useful for testing.
-     */
-    public final CompletableFuture<Void> initialIndexComplete = new CompletableFuture<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(SymbolIndex.class);
 
     private static class SourceFileIndex {
-        private final EnumMap<ElementKind, Map<String, Position>> declarations = new EnumMap<>(ElementKind.class);
-        private final EnumMap<ElementKind, Map<String, Set<Position>>> references = new EnumMap<>(ElementKind.class);
+        private final EnumMap<ElementKind, Map<String, Range>> declarations = new EnumMap<>(ElementKind.class);
+        private final EnumMap<ElementKind, Map<String, Set<Range>>> references = new EnumMap<>(ElementKind.class);
     }
 
     /**
@@ -89,27 +85,24 @@ public class SymbolIndex {
         // If invoked correctly, javac should avoid reparsing the same file twice
         // Then, use the same mechanism as the desugar / generate phases to remove method bodies,
         // to reclaim memory as we go
-        initialIndexComplete.complete(null);
 
         // TODO verify that compiler and all its resources get destroyed
     }
 
-    public Stream<? extends Position> references(Symbol symbol) {
+    public Stream<? extends Range> references(Symbol symbol) {
         // For indexed symbols, just look up the precomputed references
         if (shouldIndex(symbol)) {
             String key = uniqueName(symbol);
 
             return sourcePath.values().stream().flatMap(f -> {
-                Map<String, Set<Position>> bySymbol = f.references.getOrDefault(symbol.getKind(), Collections.emptyMap());
-                Set<Position> locations = bySymbol.getOrDefault(key, Collections.emptySet());
-
-                return locations.stream();
+                Map<String, Set<Range>> bySymbol = f.references.getOrDefault(symbol.getKind(), Collections.emptyMap());
+                return bySymbol.getOrDefault(key, Collections.emptySet()).stream();
             });
         }
         // For non-indexed symbols, scan the active set
         else {
             return activeDocuments.values().stream().flatMap(compilationUnit -> {
-                Collection<Position> references = new LinkedList<>();
+                Collection<Range> references = new LinkedList<>();
 
                 compilationUnit.accept(new TreeScanner() {
                     @Override
@@ -117,7 +110,7 @@ public class SymbolIndex {
                         super.visitSelect(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(position(tree, compilationUnit));
+                            references.add(range(tree, compilationUnit));
                     }
 
                     @Override
@@ -125,7 +118,7 @@ public class SymbolIndex {
                         super.visitReference(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(position(tree, compilationUnit));
+                            references.add(range(tree, compilationUnit));
                     }
 
                     @Override
@@ -133,7 +126,7 @@ public class SymbolIndex {
                         super.visitIdent(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(position(tree, compilationUnit));
+                            references.add(range(tree, compilationUnit));
                     }
                 });
 
@@ -143,15 +136,15 @@ public class SymbolIndex {
         }
     }
 
-    public Position findSymbol(Symbol symbol) {
+    public Range findSymbol(Symbol symbol) {
         ElementKind kind = symbol.getKind();
         String key = uniqueName(symbol);
 
         for (SourceFileIndex f : sourcePath.values()) {
-            Map<String, Position> withKind = f.declarations.getOrDefault(kind, Collections.emptyMap());
-            Position p = withKind.get(key);
-            if (p != null) {
-                return p;
+            Map<String, Range> withKind = f.declarations.getOrDefault(kind, Collections.emptyMap());
+            Range range = withKind.get(key);
+            if (range != null) {
+                return range;
             }
         }
 
@@ -159,7 +152,7 @@ public class SymbolIndex {
             JCTree symbolTree = TreeInfo.declarationFor(symbol, compilationUnit);
 
             if (symbolTree != null) {
-                return position(symbolTree, compilationUnit);
+                return range(symbolTree, compilationUnit);
             }
         }
 
@@ -234,9 +227,10 @@ public class SymbolIndex {
         private void addDeclaration(JCTree tree, Symbol symbol) {
             if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
-                Position position = position(tree, compilationUnit);
-                Map<String, Position> withKind = index.declarations.computeIfAbsent(symbol.getKind(), newKind -> new HashMap<>());
-                withKind.put(key, position);
+                Range range = range(tree, compilationUnit);
+                Map<String, Range> withKind = index.declarations.computeIfAbsent(symbol.getKind(),
+                        newKind -> new HashMap<>());
+                withKind.put(key, range);
             }
         }
 
@@ -245,10 +239,11 @@ public class SymbolIndex {
                 String key = uniqueName(symbol);
                 JavaFileObject externalOrigin = getExternalOrigin(symbol);
                 if (externalOrigin == null) {
-                    Map<String, Set<Position>> withKind = index.references.computeIfAbsent(symbol.getKind(), newKind -> new HashMap<>());
-                    Set<Position> positions = withKind.computeIfAbsent(key, newName -> new HashSet<>());
-                    Position position = position(tree, compilationUnit);
-                    positions.add(position);
+                    Map<String, Set<Range>> withKind = index.references.computeIfAbsent(symbol.getKind(),
+                            newKind -> new HashMap<>());
+                    Set<Range> ranges = withKind.computeIfAbsent(key, newName -> new HashSet<>());
+                    Range range = range(tree, compilationUnit);
+                    ranges.add(range);
                 } else {
                     DefSpec def = new DefSpec();
                     def.setPath(key);
@@ -279,7 +274,7 @@ public class SymbolIndex {
         }
     }
 
-    private Position position(JCTree tree, JCTree.JCCompilationUnit compilationUnit) {
+    private Range range(JCTree tree, JCTree.JCCompilationUnit compilationUnit) {
         try {
             // Declaration should include offset
             int offset = tree.pos;
@@ -301,11 +296,11 @@ public class SymbolIndex {
                 end = offset + symbol.name.length();
             }
 
-            Position range[] = findPosition(compilationUnit.getSourceFile(), offset, end);
+            Range range = findRange(compilationUnit.getSourceFile(), offset, end);
             URI full = compilationUnit.getSourceFile().toUri();
             String uri = root.relativize(full).toString();
-            range[0].setFile(uri);
-            return range[0];
+            range.setFile(uri);
+            return range;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -466,7 +461,7 @@ public class SymbolIndex {
         return activeDocuments.get(sourceFile);
     }
 
-    private static Position[] findPosition(JavaFileObject file, long startOffset, long endOffset) throws IOException {
+    private static Range findRange(JavaFileObject file, long startOffset, long endOffset) throws IOException {
         try (Reader in = file.openReader(true)) {
             long offset = 0;
             int line = 0;
@@ -489,9 +484,9 @@ public class SymbolIndex {
                 }
             }
 
-            Position start = new Position();
-            start.setLine(line);
-            start.setCharacter(character);
+            Range ret = new Range();
+            ret.setStartLine(line);
+            ret.setStartColumn(character);
 
             // Find the end position
             while (offset < endOffset) {
@@ -510,11 +505,10 @@ public class SymbolIndex {
                 }
             }
 
-            Position end = new Position();
-            end.setLine(line);
-            end.setCharacter(character);
+            ret.setEndLine(line);
+            ret.setEndColumn(character);
 
-            return new Position[]{start, end};
+            return ret;
         }
     }
 
@@ -531,7 +525,7 @@ public class SymbolIndex {
             throw new UncheckedIOException(e);
         }
         else if (path.getFileName().toString().endsWith(".java")) {
-            LOG.info("Index " + path);
+            LOGGER.info("Index " + path);
 
             JavaFileObject file = compiler.fileManager.getRegularFile(path.toFile());
 

@@ -183,7 +183,7 @@ public class SymbolService {
         }
     }
 
-    public Position definition(Position position) throws WorkspaceException,
+    public Range definition(Position position) throws WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
 
@@ -219,11 +219,11 @@ public class SymbolService {
                 if (index == null) {
                     throw new NoDefinitionFoundException();
                 }
-                position = index.findSymbol(visitor.found.get());
-                if (position == null) {
+                Range range = index.findSymbol(visitor.found.get());
+                if (range == null) {
                     throw new NoDefinitionFoundException();
                 }
-                return position;
+                return range;
             } else {
                 throw new NoDefinitionFoundException();
             }
@@ -279,11 +279,11 @@ public class SymbolService {
                 if (index == null) {
                     throw new NoDefinitionFoundException();
                 }
-                position = index.findSymbol(visitor.found.get());
-                if (position == null) {
+                Range range = index.findSymbol(visitor.found.get());
+                if (range == null) {
                     throw new NoDefinitionFoundException();
                 }
-                ret.getRefs().add(position);
+                ret.getRefs().add(range);
                 index.references(visitor.found.get()).forEach(ret.getRefs()::add);
                 return ret;
             } else {

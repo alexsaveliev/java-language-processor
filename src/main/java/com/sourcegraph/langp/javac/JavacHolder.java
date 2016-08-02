@@ -11,6 +11,8 @@ import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
@@ -25,8 +27,6 @@ import java.time.Instant;
 import java.util.*;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Maintains a reference to a Java compiler, 
@@ -35,13 +35,15 @@ import java.util.logging.Logger;
  * and extract the diagnostic information we want.
  */
 public class JavacHolder {
-    private static final Logger LOG = Logger.getLogger("main");
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JavacHolder.class);
+
     // javac places all of its internal state into this Context object,
     // which is basically a Map<String, Object>
     public final Context context = new Context();
 
     private final DiagnosticListener<JavaFileObject> errors = diagnostic -> {
-        LOG.warning(diagnostic.toString());
+        LOGGER.warn(diagnostic.toString());
     };
     
     {
@@ -118,14 +120,14 @@ public class JavacHolder {
     private static void clearOutputDirectory(Path file) {
         try {
             if (file.getFileName().toString().endsWith(".class")) {
-                LOG.info("Invalidate " + file);
+                LOGGER.info("Invalidate " + file);
 
                 Files.setLastModifiedTime(file, FileTime.from(Instant.EPOCH));
             }
             else if (Files.isDirectory(file))
                 Files.list(file).forEach(JavacHolder::clearOutputDirectory);
         } catch (IOException e) {
-            LOG.log(Level.SEVERE, e.getMessage(), e);
+            LOGGER.error(e.getMessage(), e);
         }
     }
 

@@ -32,7 +32,7 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/definition")
-    public Position definition(@RequestBody Position pos)
+    public Range definition(@RequestBody Position pos)
             throws WorkspaceException, SymbolException, NoDefinitionFoundException {
         return symbolService.definition(pos);
     }

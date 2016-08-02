@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
-import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
 import java.io.IOException;
 import java.io.Reader;
@@ -50,19 +49,14 @@ public class SymbolIndex {
 
     private Workspace workspace;
 
-    @FunctionalInterface
-    public interface ReportDiagnostics {
-        void report(Collection<Path> paths, DiagnosticCollector<JavaFileObject> diagnostics);
-    }
+    private JavacConfig config;
 
     public SymbolIndex(JavacConfig config,
                        Path root,
                        Workspace workspace) {
 
-        if (root != null) {
-            this.root = root.toUri();
-        }
-
+        this.config = config;
+        this.root = root.toUri();
         this.workspace = workspace;
 
         JavacHolder compiler = new JavacHolder(config);
@@ -245,9 +239,13 @@ public class SymbolIndex {
                     Range range = range(tree, compilationUnit);
                     ranges.add(range);
                 } else {
-                    DefSpec def = new DefSpec();
-                    def.setPath(key);
-                    workspace.getExternalDefs().add(def);
+                    String repository = Origin.getRepository(externalOrigin, config);
+                    if (repository != null) {
+                        DefSpec def = new DefSpec();
+                        def.setPath(key);
+                        def.setRepo(repository);
+                        workspace.getExternalDefs().add(def);
+                    }
                 }
             }
         }

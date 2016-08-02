@@ -263,14 +263,19 @@ public class SymbolService {
         }
     }
 
-    public ExternalRefs externalRefs(RepoRev repoRev) throws WorkspaceException,
+    public ExternalRefs externalRefs(RepoRev repoRev)
+            throws WorkspaceBeingClonedException,
+            WorkspaceBeingConfiguredException,
+            WorkspaceException,
             SymbolException {
 
         LOGGER.info("External refs {}:{}",
                 repoRev.getRepo(),
                 repoRev.getCommit());
+
+        Path root = workspaceService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
+
         try {
-            Path root = workspaceService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
             Workspace workspace = Workspace.getInstance(root);
             workspace.computeIndexes();
             ExternalRefs ret = new ExternalRefs();

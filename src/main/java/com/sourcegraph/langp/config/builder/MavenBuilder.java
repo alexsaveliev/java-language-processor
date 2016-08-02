@@ -133,6 +133,16 @@ public class MavenBuilder {
             JavacConfig configuration = new JavacConfig();
             configuration.sources = collectSourcePath(project, idToProjectMap);
             configuration.outputDirectory = project.getBuild().getOutputDirectory();
+            Set<com.sourcegraph.langp.model.Dependency> dependencies = new HashSet<>();
+            List<Dependency> mavenDeps = project.getDependencies();
+            for (Dependency d : mavenDeps) {
+                dependencies.add(new com.sourcegraph.langp.model.Dependency(d.getGroupId(),
+                        d.getArtifactId(),
+                        d.getVersion(),
+                        null));
+            }
+
+            configuration.dependencies = dependencies;
             // will fetch external dependencies only
             Collection<Dependency> externalDependencies = collectDependencies(project,
                     idToProjectMap,
@@ -151,6 +161,15 @@ public class MavenBuilder {
                 File file = artifact.getFile();
                 if (file != null) {
                     classPath.add(file.getAbsolutePath());
+                    // updating unit dependencies with files after resolution
+                    for (com.sourcegraph.langp.model.Dependency dependency : dependencies) {
+                        if (dependency.artifactID.equals(artifact.getArtifactId()) &&
+                                dependency.groupID.equals(artifact.getGroupId()) &&
+                                dependency.version.equals(artifact.getVersion())) {
+                            dependency.file = file.toString();
+                            break;
+                        }
+                    }
                 }
             }
             configuration.classPath = classPath;

@@ -2,6 +2,7 @@ package com.sourcegraph.langp.model;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,9 @@ public class JavacConfig {
     public Collection<String> sources;
     public Collection<String> classPath;
     public String outputDirectory;
+    public boolean android;
+    public boolean androidSdk;
+    public Collection<Dependency> dependencies;
 
     /**
      * @param path to check
@@ -57,6 +61,13 @@ public class JavacConfig {
         if (outputDirectory != null) {
             outputDirectory = workspaceRoot.resolve(outputDirectory).toString();
         }
+        if (dependencies != null) {
+            for (Dependency dependency : dependencies) {
+                if (!StringUtils.isEmpty(dependency.file)) {
+                    dependency.file = workspaceRoot.resolve(dependency.file).toAbsolutePath().normalize().toString();
+                }
+            }
+        }
         File target = targetDir.resolve(CONFIG_FILE_NAME).toFile();
         try (FileWriter writer = new FileWriter(target)) {
             gson.toJson(this, writer);
@@ -65,6 +76,18 @@ public class JavacConfig {
             LOGGER.warn("Failed to save configuration", e);
         }
     }
+
+    public Dependency getDependencyForJar(Path jar) {
+        String sample = jar.toAbsolutePath().normalize().toString();
+        for (Dependency dependency : dependencies) {
+            if (sample.equals(dependency.file)) {
+                return dependency;
+            }
+        }
+        return null;
+    }
+
+
 
     /**
      * Tries to read configuration in the given directory

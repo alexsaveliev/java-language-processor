@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Set;
@@ -29,6 +30,7 @@ public class DefaultBuilder {
         JavacConfig configuration = new JavacConfig();
         configuration.classPath = new LinkedList<>();
         configuration.sources = directories;
+        configuration.dependencies = Collections.emptyList();
         configuration.save(path, path);
 
         return true;

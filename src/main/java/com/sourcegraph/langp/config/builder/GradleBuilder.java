@@ -1,5 +1,6 @@
 package com.sourcegraph.langp.config.builder;
 
+import com.sourcegraph.langp.model.Dependency;
 import com.sourcegraph.langp.model.JavacConfig;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -57,6 +58,7 @@ public class GradleBuilder {
                 configuration.sources = new LinkedHashSet<>();
                 configuration.classPath = new LinkedHashSet<>();
                 configuration.outputDirectory = project.outputDir;
+                configuration.dependencies = project.dependencies;
                 configurations.put(project.id(), configuration);
             }
 
@@ -217,7 +219,6 @@ public class GradleBuilder {
                                         groupId(parts[1]), // GroupID
                                         parts[2], // ArtifactID
                                         parts[3], // Version
-                                        parts[0], // Scope
                                         parts.length > 4 ? parts[4] : null // file
                                 ));
                                 break;
@@ -486,24 +487,6 @@ public class GradleBuilder {
         SourcePathElement(String name, String filePath) {
             this.name = name;
             this.filePath = filePath;
-        }
-
-    }
-
-    private static class Dependency {
-
-        String groupID;
-        String artifactID;
-        String version;
-        String scope;
-        String file;
-
-        Dependency(String groupID, String artifactID, String version, String scope, String file) {
-            this.groupID = groupID;
-            this.artifactID = artifactID;
-            this.version = version;
-            this.scope = scope;
-            this.file = file;
         }
     }
 

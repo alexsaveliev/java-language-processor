@@ -486,7 +486,7 @@ public class SymbolIndex {
 
             Range ret = new Range();
             ret.setStartLine(line);
-            ret.setStartColumn(character);
+            ret.setStartCharacter(character);
 
             // Find the end position
             while (offset < endOffset) {
@@ -506,7 +506,7 @@ public class SymbolIndex {
             }
 
             ret.setEndLine(line);
-            ret.setEndColumn(character);
+            ret.setEndCharacter(character);
 
             return ret;
         }

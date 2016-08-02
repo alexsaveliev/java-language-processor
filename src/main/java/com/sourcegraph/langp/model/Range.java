@@ -10,14 +10,14 @@ public class Range extends RepoRev {
     @JsonProperty(value="StartLine")
     private int startLine;
 
-    @JsonProperty(value="StartColumn")
-    private int startColumn;
+    @JsonProperty(value="StartCharacter")
+    private int startCharacter;
 
     @JsonProperty(value="EndLine")
     private int endLine;
 
-    @JsonProperty(value="EndColumn")
-    private int endColumn;
+    @JsonProperty(value="EndCharacter")
+    private int endCharacter;
 
     public String getFile() {
         return file;
@@ -35,12 +35,12 @@ public class Range extends RepoRev {
         this.startLine = startLine;
     }
 
-    public int getStartColumn() {
-        return startColumn;
+    public int getStartCharacter() {
+        return startCharacter;
     }
 
-    public void setStartColumn(int startColumn) {
-        this.startColumn = startColumn;
+    public void setStartCharacter(int startCharacter) {
+        this.startCharacter = startCharacter;
     }
 
     public int getEndLine() {
@@ -51,11 +51,11 @@ public class Range extends RepoRev {
         this.endLine = endLine;
     }
 
-    public int getEndColumn() {
-        return endColumn;
+    public int getEndCharacter() {
+        return endCharacter;
     }
 
-    public void setEndColumn(int endColumn) {
-        this.endColumn = endColumn;
+    public void setEndCharacter(int endCharacter) {
+        this.endCharacter = endCharacter;
     }
 }

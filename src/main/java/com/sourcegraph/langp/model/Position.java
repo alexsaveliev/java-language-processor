@@ -2,15 +2,20 @@ package com.sourcegraph.langp.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.validation.constraints.NotNull;
+
 public class Position extends RepoRev {
 
     @JsonProperty(value = "File")
+    @NotNull
     private String file;
 
     @JsonProperty(value = "Line")
+    @NotNull
     private int line;
 
     @JsonProperty(value = "Character")
+    @NotNull
     private int character;
 
     public String getFile() {

@@ -5,12 +5,18 @@ import com.google.gson.GsonBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class JavacConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JavacConfig.class);

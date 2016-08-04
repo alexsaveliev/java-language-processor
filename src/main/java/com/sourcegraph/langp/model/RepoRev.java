@@ -2,12 +2,16 @@ package com.sourcegraph.langp.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.validation.constraints.NotNull;
+
 public class RepoRev {
 
     @JsonProperty(value = "Repo")
+    @NotNull
     private String repo;
 
     @JsonProperty(value = "Commit")
+    @NotNull
     private String commit;
 
     public String getRepo() {

@@ -1,5 +1,6 @@
 package com.sourcegraph.langp.javac;
 
+import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.Context;
@@ -15,8 +16,8 @@ public class SymbolUnderCursorVisitor extends CursorScanner {
     public Optional<Symbol> found = Optional.empty();
     public JCTree foundTree;
 
-    public SymbolUnderCursorVisitor(JavaFileObject file, long cursor, Context context) {
-        super(file, cursor, context);
+    public SymbolUnderCursorVisitor(long cursor, Trees trees) {
+        super(cursor, trees);
     }
 
     @Override

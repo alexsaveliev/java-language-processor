@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletResponse;
+import javax.validation.Valid;
 import java.io.IOException;
 
 @RestController
@@ -20,15 +21,14 @@ public class LanguageProcessorController {
     private static final Logger LOGGER = LoggerFactory.getLogger(LanguageProcessorController.class);
 
     @Autowired
-    private WorkspaceService workspaceService;
+    private RepositoryService repositoryService;
 
     @Autowired
     private SymbolService symbolService;
 
     @PostMapping(value = "/definition")
-    public Range definition(@RequestBody Position pos)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+    public Range definition(@Valid @RequestBody Position pos)
+            throws WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -36,18 +36,16 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/hover")
-    public Hover hover(@RequestBody Position pos)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+    public Hover hover(@Valid @RequestBody Position pos)
+            throws WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException {
         return symbolService.hover(pos);
     }
 
     @PostMapping(value = "/local-refs")
-    public LocalRefs localRefs(@RequestBody Position pos)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+    public LocalRefs localRefs(@Valid @RequestBody Position pos)
+            throws WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -55,31 +53,31 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/external-refs")
-    public ExternalRefs externalRefs(@RequestBody RepoRev repoRev)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+    public ExternalRefs externalRefs(@Valid @RequestBody RepoRev repoRev)
+            throws WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException {
         return symbolService.externalRefs(repoRev);
     }
 
-    @ExceptionHandler({WorkspaceBeingConfiguredException.class})
+    @ExceptionHandler({WorkspaceBeingPreparedException.class})
     @ResponseBody
-    ResponseEntity<Error> handleWorkspaceBeingConfiguredException(HttpServletResponse response) throws IOException {
-        Error error = new Error("Workspace being configured...");
+    ResponseEntity<Error> handleWorkspaceBeingClonedException(HttpServletResponse response) throws IOException {
+        Error error = new Error("Workspace being prepared...");
         return new ResponseEntity<>(error, HttpStatus.ACCEPTED);
     }
 
-    @ExceptionHandler({WorkspaceBeingClonedException.class})
+    @ExceptionHandler({NoDefinitionFoundException.class})
     @ResponseBody
-    ResponseEntity<Error> handleWorkspaceBeingClonedException(HttpServletResponse response) throws IOException {
-        Error error = new Error("Workspace being cloned...");
-        return new ResponseEntity<>(error, HttpStatus.ACCEPTED);
+    ResponseEntity<Error> handleNoDefinitionFoundException(HttpServletResponse response) throws IOException {
+        Error error = new Error("No definition found");
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler({Exception.class})
     @ResponseBody
     ResponseEntity<Error> handleError(HttpServletResponse response, Exception ex) throws IOException {
+        LOGGER.error("An internal error occurred", ex);
         Error error = new Error(ex.getMessage());
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }

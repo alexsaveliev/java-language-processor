@@ -1,18 +1,17 @@
 package com.sourcegraph.langp.service;
 
-import com.sourcegraph.langp.javac.ShortTypePrinter;
-import com.sourcegraph.langp.javac.SymbolIndex;
-import com.sourcegraph.langp.javac.SymbolUnderCursorVisitor;
-import com.sourcegraph.langp.javac.Workspace;
+import com.sourcegraph.langp.javac.*;
 import com.sourcegraph.langp.model.*;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.tools.JavaFileObject;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Path;
@@ -20,11 +19,21 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 public class SymbolService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolService.class);
+
+    @Value("${workspace.get.timeout:250}")
+    private long timeout;
+
+    @Autowired
+    private RepositoryService repositoryService;
 
     @Autowired
     private WorkspaceService workspaceService;
@@ -32,8 +41,7 @@ public class SymbolService {
     private Map<String, Long> offsets = new HashMap<>();
 
     public Hover hover(Position position)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+            throws WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException {
 
@@ -44,8 +52,8 @@ public class SymbolService {
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = workspaceService.getWorkspace(position.getRepo(), position.getCommit()).toPath();
-        Workspace workspace = Workspace.getInstance(root);
+        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
+        Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
         if (!sourceFile.startsWith(root)) {
@@ -59,12 +67,12 @@ public class SymbolService {
         Hover result = new Hover();
 
         try {
-            JCTree.JCCompilationUnit tree = workspace.getTree(sourceFile);
-            JavaFileObject file = workspace.getFile(sourceFile);
-            long cursor = findOffset(file, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = new SymbolUnderCursorVisitor(file,
-                    cursor,
-                    workspace.findCompiler(sourceFile).context);
+            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+            if (tree == null) {
+                throw new SymbolException("File does not exist");
+            }
+            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
+            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
@@ -138,8 +146,7 @@ public class SymbolService {
     }
 
     public Range definition(Position position) throws
-            WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+            WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -151,8 +158,8 @@ public class SymbolService {
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = workspaceService.getWorkspace(position.getRepo(), position.getCommit()).toPath();
-        Workspace workspace = Workspace.getInstance(root);
+        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
+        Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
         if (!sourceFile.startsWith(root)) {
@@ -163,12 +170,12 @@ public class SymbolService {
         }
 
         try {
-            JCTree.JCCompilationUnit tree = workspace.getTree(sourceFile);
-            JavaFileObject file = workspace.getFile(sourceFile);
-            long cursor = findOffset(file, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = new SymbolUnderCursorVisitor(file,
-                    cursor,
-                    workspace.findCompiler(sourceFile).context);
+            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+            if (tree == null) {
+                throw new SymbolException("File does not exist");
+            }
+            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
+            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
@@ -184,10 +191,10 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException e) {
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for hover {}:{}/{} {}:{}",
+            LOGGER.info("An error occurred while looking for definition {}:{}/{} {}:{}",
                     position.getRepo(),
                     position.getCommit(),
                     position.getFile(),
@@ -199,8 +206,7 @@ public class SymbolService {
     }
 
     public LocalRefs localRefs(Position position) throws
-            WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
+            WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -212,9 +218,8 @@ public class SymbolService {
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = workspaceService.getWorkspace(position.getRepo(), position.getCommit()).toPath();
-        Workspace workspace = Workspace.getInstance(root);
-
+        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
+        Workspace workspace = workspaceService.getWorkspace(root);
         Path sourceFile = root.resolve(position.getFile());
         if (!sourceFile.startsWith(root)) {
             throw new SymbolException("File is outside of workspace");
@@ -226,12 +231,14 @@ public class SymbolService {
         LocalRefs ret = new LocalRefs();
         ret.setRefs(new LinkedList<>());
         try {
-            JCTree.JCCompilationUnit tree = workspace.getTree(sourceFile);
-            JavaFileObject file = workspace.getFile(sourceFile);
-            long cursor = findOffset(file, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = new SymbolUnderCursorVisitor(file,
-                    cursor,
-                    workspace.findCompiler(sourceFile).context);
+            workspace.computeIndexes();
+            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+            if (tree == null) {
+                throw new SymbolException("File does not exist");
+            }
+
+            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
+            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
@@ -264,19 +271,22 @@ public class SymbolService {
     }
 
     public ExternalRefs externalRefs(RepoRev repoRev)
-            throws WorkspaceBeingClonedException,
-            WorkspaceBeingConfiguredException,
-            WorkspaceException,
+            throws WorkspaceException,
             SymbolException {
 
         LOGGER.info("External refs {}:{}",
                 repoRev.getRepo(),
                 repoRev.getCommit());
 
-        Path root = workspaceService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
+        Path root;
+        try {
+            root = repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit()).get().toPath();
+        } catch (InterruptedException | ExecutionException e) {
+            throw new WorkspaceException(e);
+        }
 
         try {
-            Workspace workspace = Workspace.getInstance(root);
+            Workspace workspace = workspaceService.getWorkspace(root);
             workspace.computeIndexes();
             ExternalRefs ret = new ExternalRefs();
             ret.setDefs(workspace.getExternalDefs());
@@ -290,8 +300,8 @@ public class SymbolService {
         }
     }
 
-    private long findOffset(JavaFileObject file, int targetLine, int targetCharacter) {
-        String id = file.getName() + ':' + targetLine + ':' + targetCharacter;
+    private long findOffset(Path file, int targetLine, int targetCharacter) {
+        String id = file.toString() + ':' + targetLine + ':' + targetCharacter;
         Long offset = offsets.get(id);
         if (offset == null) {
             try {
@@ -304,10 +314,10 @@ public class SymbolService {
         return offset;
     }
 
-    private long computeOffset(JavaFileObject file,
+    private long computeOffset(Path file,
                                int targetLine,
                                int targetCharacter) throws IOException {
-        try (Reader in = file.openReader(true)) {
+        try (Reader in = new FileReader(file.toFile())) {
             long offset = 0;
             int line = 0;
             int character = 0;
@@ -337,6 +347,34 @@ public class SymbolService {
             }
 
             return offset;
+        }
+    }
+
+    private File getWorkspace(String repo, String commit)
+            throws WorkspaceBeingPreparedException, WorkspaceException {
+        Future<File> workspaceRoot = repositoryService.getRepository(repo, commit);
+        try {
+            return workspaceRoot.get(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.error("An error occurred", e);
+            throw new WorkspaceException(e);
+        } catch (TimeoutException e) {
+            throw new WorkspaceBeingPreparedException();
+        }
+    }
+
+    private JCTree.JCCompilationUnit getTree(Workspace workspace, Path path)
+            throws WorkspaceBeingPreparedException, WorkspaceException {
+        Future<JCTree.JCCompilationUnit> future = workspace.getTree(path);
+        if (future == null) {
+            throw new WorkspaceBeingPreparedException();}
+        try {
+            return future.get(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.error("An error occurred", e);
+            throw new WorkspaceException(e);
+        } catch (TimeoutException e) {
+            throw new WorkspaceBeingPreparedException();
         }
     }
 }

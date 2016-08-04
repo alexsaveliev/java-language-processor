@@ -1,20 +1,19 @@
 package com.sourcegraph.langp.javac;
 
-import com.sun.tools.javac.api.JavacTrees;
+import com.sun.source.util.Trees;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.util.Context;
 
-import javax.tools.JavaFileObject;
 import java.util.Collection;
 
 class CursorScanner extends BaseScanner {
-    protected final JavaFileObject file;
-    protected final long cursor;
 
-    public CursorScanner(JavaFileObject file, long cursor, Context context) {
-        super(context);
-        this.file = file;
+    protected final long cursor;
+    protected final Trees trees;
+
+    public CursorScanner(long cursor, Trees trees) {
+        super();
         this.cursor = cursor;
+        this.trees = trees;
     }
 
     @Override
@@ -24,12 +23,9 @@ class CursorScanner extends BaseScanner {
     }
 
     protected boolean containsCursor(JCTree node) {
-        JavaFileObject nodeFile = compilationUnit.getSourceFile();
-
-        if (!nodeFile.equals(file))
+        if (trees == null) {
             return false;
-
-        JavacTrees trees = JavacTrees.instance(context);
+        }
         long start = trees.getSourcePositions().getStartPosition(compilationUnit, node);
         long end = trees.getSourcePositions().getEndPosition(compilationUnit, node);
 

@@ -12,6 +12,10 @@ public class WorkspaceException extends Exception {
         super(message);
     }
 
+    public WorkspaceException(Throwable cause) {
+        super(cause);
+    }
+
     public WorkspaceException(String message, Throwable cause) {
         super(message, cause);
     }

@@ -3,28 +3,31 @@ package com.sourcegraph.langp.javac;
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
 import com.sourcegraph.langp.model.Range;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.tree.TreeScanner;
-import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.Name;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.tools.JavaFileObject;
+import javax.tools.StandardJavaFileManager;
 import java.io.IOException;
 import java.io.Reader;
-import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
+import java.util.concurrent.*;
 
 public class SymbolIndex {
 
@@ -43,68 +46,62 @@ public class SymbolIndex {
     /**
      * Active files, for which we index locals
      */
-    private Map<URI, JCTree.JCCompilationUnit> activeDocuments = new ConcurrentHashMap<>();
+    private Map<URI, Future<JCTree.JCCompilationUnit>> activeDocuments = new ConcurrentHashMap<>();
 
-    private URI root;
+    private Path root;
 
     private Workspace workspace;
 
     private JavacConfig config;
 
+    private Executor executor;
+
+    private Trees trees;
+
     public SymbolIndex(JavacConfig config,
                        Path root,
-                       Workspace workspace) {
+                       Workspace workspace,
+                       Executor executor) {
 
         this.config = config;
-        this.root = root.toUri();
+        this.root = root;
         this.workspace = workspace;
-
-        JavacHolder compiler = new JavacHolder(config);
-        Indexer indexer = new Indexer(compiler.context);
-
-        List<JCTree.JCCompilationUnit> parsed = new ArrayList<>();
-        List<Path> paths = new ArrayList<>();
-
-        // Parse each file
-        config.sources.forEach(s -> parseAll(compiler, Paths.get(s), parsed, paths));
-
-        // Compile all parsed files
-        compiler.compile(parsed);
-
-        parsed.forEach(p -> p.accept(indexer));
-
-        // TODO minimize memory use during this process
-        // Instead of doing parse-all / compile-all,
-        // queue all files, then do parse / compile on each
-        // If invoked correctly, javac should avoid reparsing the same file twice
-        // Then, use the same mechanism as the desugar / generate phases to remove method bodies,
-        // to reclaim memory as we go
-
-        // TODO verify that compiler and all its resources get destroyed
+        this.executor = executor;
+        this.executor.execute(new IndexBuilder(root, config));
     }
 
-    public Stream<? extends Range> references(Symbol symbol) {
+    public Collection<Range> references(Symbol symbol) {
         // For indexed symbols, just look up the precomputed references
+
+        Collection<Range> references = new LinkedList<>();
         if (shouldIndex(symbol)) {
             String key = uniqueName(symbol);
-
-            return sourcePath.values().stream().flatMap(f -> {
-                Map<String, Set<Range>> bySymbol = f.references.getOrDefault(symbol.getKind(), Collections.emptyMap());
-                return bySymbol.getOrDefault(key, Collections.emptySet()).stream();
-            });
+            for (SourceFileIndex index : sourcePath.values()) {
+                Map<String, Set<Range>> withKind = index.references.getOrDefault(symbol.getKind(),
+                        Collections.emptyMap());
+                Collection<Range> results = withKind.get(key);
+                if (results != null) {
+                    references.addAll(results);
+                }
+            }
         }
         // For non-indexed symbols, scan the active set
         else {
-            return activeDocuments.values().stream().flatMap(compilationUnit -> {
-                Collection<Range> references = new LinkedList<>();
-
-                compilationUnit.accept(new TreeScanner() {
+            for (Future<JCTree.JCCompilationUnit> documentFuture : activeDocuments.values()) {
+                final JCTree.JCCompilationUnit document;
+                try {
+                    document = documentFuture.get();
+                } catch (InterruptedException | ExecutionException e) {
+                    LOGGER.error("An error occurred while retrieving index", e);
+                    continue;
+                }
+                document.accept(new TreeScanner() {
                     @Override
                     public void visitSelect(JCTree.JCFieldAccess tree) {
                         super.visitSelect(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, compilationUnit));
+                            references.add(range(tree, document));
                     }
 
                     @Override
@@ -112,7 +109,7 @@ public class SymbolIndex {
                         super.visitReference(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, compilationUnit));
+                            references.add(range(tree, document));
                     }
 
                     @Override
@@ -120,14 +117,12 @@ public class SymbolIndex {
                         super.visitIdent(tree);
 
                         if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, compilationUnit));
+                            references.add(range(tree, document));
                     }
                 });
-
-
-                return references.stream();
-            });
+            }
         }
+        return references;
     }
 
     public Range findSymbol(Symbol symbol) {
@@ -142,9 +137,17 @@ public class SymbolIndex {
             }
         }
 
-        for (JCTree.JCCompilationUnit compilationUnit : activeDocuments.values()) {
+        for (Future<JCTree.JCCompilationUnit> future : activeDocuments.values()) {
+            JCTree.JCCompilationUnit compilationUnit;
+            try {
+                compilationUnit = future.get(100, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                return null;
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.error("An error occurred", e);
+                return null;
+            }
             JCTree symbolTree = TreeInfo.declarationFor(symbol, compilationUnit);
-
             if (symbolTree != null) {
                 return range(symbolTree, compilationUnit);
             }
@@ -154,11 +157,8 @@ public class SymbolIndex {
     }
 
     private class Indexer extends BaseScanner {
-        private SourceFileIndex index;
 
-        public Indexer(Context context) {
-            super(context);
-        }
+        private SourceFileIndex index;
 
         @Override
         public void visitTopLevel(JCTree.JCCompilationUnit tree) {
@@ -166,7 +166,6 @@ public class SymbolIndex {
 
             index = new SourceFileIndex();
             sourcePath.put(uri, index);
-
             super.visitTopLevel(tree);
 
         }
@@ -296,7 +295,7 @@ public class SymbolIndex {
 
             Range range = findRange(compilationUnit.getSourceFile(), offset, end);
             URI full = compilationUnit.getSourceFile().toUri();
-            String uri = root.relativize(full).toString();
+            String uri = root.toUri().relativize(full).toString();
             range.setFile(uri);
             return range;
         } catch (IOException e) {
@@ -362,7 +361,6 @@ public class SymbolIndex {
     }
 
     /**
-     *
      * @param symbol symbol
      * @return file object if symbol refers to external artifact (comes from classpath, not sourcepath) or null
      */
@@ -389,7 +387,7 @@ public class SymbolIndex {
             case INTERFACE:
             case ENUM:
             case ANNOTATION_TYPE:
-                return  (Symbol.ClassSymbol) e;
+                return (Symbol.ClassSymbol) e;
             default:
                 return forElement(e.getEnclosingElement());
         }
@@ -412,50 +410,7 @@ public class SymbolIndex {
         }
     }
 
-    // TODO
-    /*
-    private static int symbolInformationKind(ElementKind kind) {
-        switch (kind) {
-            case PACKAGE:
-                return SymbolInformation.KIND_PACKAGE;
-            case ENUM:
-            case ENUM_CONSTANT:
-                return SymbolInformation.KIND_ENUM;
-            case CLASS:
-                return SymbolInformation.KIND_CLASS;
-            case ANNOTATION_TYPE:
-            case INTERFACE:
-                return SymbolInformation.KIND_INTERFACE;
-            case FIELD:
-                return SymbolInformation.KIND_PROPERTY;
-            case PARAMETER:
-            case LOCAL_VARIABLE:
-            case EXCEPTION_PARAMETER:
-            case TYPE_PARAMETER:
-                return SymbolInformation.KIND_VARIABLE;
-            case METHOD:
-            case STATIC_INIT:
-            case INSTANCE_INIT:
-                return SymbolInformation.KIND_METHOD;
-            case CONSTRUCTOR:
-                return SymbolInformation.KIND_CONSTRUCTOR;
-            case OTHER:
-            case RESOURCE_VARIABLE:
-            default:
-                return SymbolInformation.KIND_STRING;
-        }
-    }
-    */
-
-    public void update(JCTree.JCCompilationUnit tree, Context context) {
-        Indexer indexer = new Indexer(context);
-
-        tree.accept(indexer);
-
-        activeDocuments.put(tree.getSourceFile().toUri(), tree);
-    }
-
-    public JCTree.JCCompilationUnit get(URI sourceFile) {
+    public Future<JCTree.JCCompilationUnit> get(URI sourceFile) {
         return activeDocuments.get(sourceFile);
     }
 
@@ -510,27 +465,81 @@ public class SymbolIndex {
         }
     }
 
-    /**
-     * Look for .java files and invalidate them
-     */
-    private void parseAll(JavacHolder compiler,
-                          Path path,
-                          List<JCTree.JCCompilationUnit> trees,
-                          List<Path> paths) {
-        if (Files.isDirectory(path)) try {
-            Files.list(path).forEach(p -> parseAll(compiler, p, trees, paths));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    private class IndexBuilder implements Runnable {
+
+        private Path root;
+        private JavacConfig config;
+
+        IndexBuilder(Path root, JavacConfig config) {
+            this.root = root;
+            this.config = config;
         }
-        else if (path.getFileName().toString().endsWith(".java")) {
-            LOGGER.info("Index " + path);
 
-            JavaFileObject file = compiler.fileManager.getRegularFile(path.toFile());
+        @Override
+        public void run() {
+            LOGGER.info("Building indexes for [{}]", StringUtils.join(config.sources, ' '));
+            JavacHolder javacHolder = new JavacHolder(config);
+            Iterable<? extends JavaFileObject> sources;
+            try {
+                sources = getSourceFiles(javacHolder.fileManager);
+            } catch (IOException ex) {
+                LOGGER.error("An error occurred while indexing source files", ex);
+                return;
+            }
+            Iterable<? extends CompilationUnitTree> units;
+            try {
+                units = javacHolder.compile(sources);
+            } catch (IOException ex) {
+                LOGGER.error("An error occurred while indexing source files", ex);
+                return;
+            }
+            trees = javacHolder.trees;
+            CompletionService<JCTree.JCCompilationUnit> completionService =
+                    new ExecutorCompletionService<>(executor);
 
-            trees.add(compiler.parse(file));
-            paths.add(path);
+            int total = 0;
+            for (CompilationUnitTree unit : units) {
+                JCTree.JCCompilationUnit jcCompilationUnit = (JCTree.JCCompilationUnit) unit;
+                total++;
+                activeDocuments.put(unit.getSourceFile().toUri(), completionService.submit(() -> {
+                    LOGGER.info("Indexing {}", unit.getSourceFile().getName());
+                    jcCompilationUnit.accept(new Indexer());
+                    return jcCompilationUnit;
+                }));
+            }
+            boolean errors = false;
+            while (total > 0 && !errors) {
+                try {
+                    Future<JCTree.JCCompilationUnit> future = completionService.take();
+                    future.get();
+                } catch (Exception ex) {
+                    LOGGER.error("An error occurred while indexing source files", ex);
+                    errors = true;
+                }
+                total--;
+            }
+        }
+
+        private Iterable<? extends JavaFileObject> getSourceFiles(StandardJavaFileManager fileManager)
+                throws IOException {
+            Collection<String> sources = new LinkedList<>();
+            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    String name = file.getFileName().toString();
+                    if (name.endsWith(".java")) {
+                        sources.add(file.toAbsolutePath().normalize().toString());
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+            });
+            return fileManager.getJavaFileObjectsFromStrings(sources);
         }
     }
 
+    public SymbolUnderCursorVisitor getSymbolUnderCursorVisitor(Path sourceFile, long cursor) {
+        return new SymbolUnderCursorVisitor(cursor, trees);
+    }
 
 }

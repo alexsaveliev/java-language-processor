@@ -1,17 +1,13 @@
 package com.sourcegraph.langp.javac;
 
-import com.sun.source.util.TreePath;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeScanner;
-import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 
 class BaseScanner extends TreeScanner {
-    protected final Context context;
     protected JCTree.JCCompilationUnit compilationUnit;
 
-    public BaseScanner(Context context) {
-        this.context = context;
+    public BaseScanner() {
     }
 
     @Override

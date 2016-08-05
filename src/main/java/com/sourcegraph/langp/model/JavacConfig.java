@@ -1,35 +1,26 @@
 package com.sourcegraph.langp.model;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.config.ConfigurableBeanFactory;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Scope;
-import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
-@Component
-@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class JavacConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JavacConfig.class);
 
     public static final String CONFIG_FILE_NAME = ".jconfig.json";
 
-    private static Gson gson;
+    private static ObjectMapper mapper;
 
     static {
-        GsonBuilder gsonBuilder = new GsonBuilder();
-        gsonBuilder.setPrettyPrinting();
-        gsonBuilder.disableHtmlEscaping();
-        gson = gsonBuilder.create();
+        mapper = new ObjectMapper();
     }
 
     public Collection<String> sources;
@@ -38,6 +29,8 @@ public class JavacConfig {
     public boolean android;
     public boolean androidSdk;
     public Collection<Dependency> dependencies;
+
+    private Path file;
 
     /**
      * @param path to check
@@ -75,8 +68,10 @@ public class JavacConfig {
             }
         }
         File target = targetDir.resolve(CONFIG_FILE_NAME).toFile();
+        this.file = target.toPath().toAbsolutePath().normalize();
+
         try (FileWriter writer = new FileWriter(target)) {
-            gson.toJson(this, writer);
+            mapper.writeValue(writer, this);
             LOGGER.info("Wrote {}", target);
         } catch (IOException e) {
             LOGGER.warn("Failed to save configuration", e);
@@ -104,7 +99,9 @@ public class JavacConfig {
         File file = dir.resolve(CONFIG_FILE_NAME).toFile();
         if (file.isFile()) {
             try (Reader reader = new FileReader(file)){
-                return gson.fromJson(reader, JavacConfig.class);
+                JavacConfig ret = mapper.readValue(reader, JavacConfig.class);
+                ret.file = file.toPath().toAbsolutePath().normalize();
+                return ret;
             } catch (IOException e) {
                 LOGGER.warn("Cannot read {}", file, e);
                 return null;
@@ -112,4 +109,10 @@ public class JavacConfig {
         }
         return null;
     }
+
+    @JsonIgnore
+    public Path getFile() {
+        return file;
+    }
+
 }

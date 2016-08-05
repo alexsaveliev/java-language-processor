@@ -39,7 +39,8 @@ public class LanguageProcessorController {
     public Hover hover(@Valid @RequestBody Position pos)
             throws WorkspaceBeingPreparedException,
             WorkspaceException,
-            SymbolException {
+            SymbolException,
+            NoDefinitionFoundException {
         return symbolService.hover(pos);
     }
 

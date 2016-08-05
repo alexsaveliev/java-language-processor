@@ -8,6 +8,9 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Maintains workspaces
+ */
 @Service
 public class WorkspaceService {
 
@@ -16,6 +19,10 @@ public class WorkspaceService {
 
     private Map<Path, Workspace> workspaces = new HashMap<>();
 
+    /**
+     * @param path workspace root
+     * @return workspace with the specified root
+     */
     public synchronized Workspace getWorkspace(Path path) {
         Workspace ret = workspaces.get(path);
         if (ret == null) {
@@ -23,6 +30,13 @@ public class WorkspaceService {
             workspaces.put(path, ret);
         }
         return ret;
+    }
+
+    /**
+     * Cleanups cache
+     */
+    public void purge() {
+        workspaces.clear();
     }
 
 }

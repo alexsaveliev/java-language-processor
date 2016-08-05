@@ -3,47 +3,74 @@ package com.sourcegraph.langp.javac;
 import com.sourcegraph.langp.config.builder.ScanUtil;
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
-import com.sun.tools.javac.tree.JCTree;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
+/**
+ * Workspace is a collection of indexes (sub-projects)
+ */
 public class Workspace {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Workspace.class);
+
 
     private Path root;
 
-    private Map<JavacConfig, SymbolIndex> indexCache = new ConcurrentHashMap<>();
+    /**
+     * source file -> index mapping
+     */
+    private Map<Path, Future<SymbolIndex>> indexCache = new ConcurrentHashMap<>();
 
+    /**
+     * config file -> config mapping
+     */
     private Map<Path, JavacConfig> configCache = new ConcurrentHashMap<>();
 
+    /**
+     * All the external defs used in workspace
+     */
     private Collection<DefSpec> externalDefs = ConcurrentHashMap.newKeySet();
 
-    private Executor executor;
+    private ExecutorService executorService;
 
-    Workspace(Path root, Executor executor) {
+    Workspace(Path root, ExecutorService executorService) {
         this.root = root;
-        this.executor = executor;
+        this.executorService = executorService;
     }
 
-    public SymbolIndex findIndex(Path path) {
+    /**
+     * @param path source file path
+     * @return index associated that includes given path
+     */
+    public Future<SymbolIndex> findIndex(Path path) {
         Path dir = path.getParent();
         JavacConfig config = findConfig(dir);
         if (config == null) {
             throw new NoJavaConfigException(path);
         }
-        return indexCache.computeIfAbsent(config,
-                javacConfig -> new SymbolIndex(javacConfig, root, this, executor));
+        return indexCache.computeIfAbsent(config.getFile(),
+                configFile -> new SymbolIndex(config, root, this, executorService).index());
     }
 
+    /**
+     * @param dir directory to search in
+     * @return configuration for specific directory (or any parent)
+     */
     private JavacConfig findConfig(Path dir) {
         return configCache.computeIfAbsent(dir, this::doFindConfig);
     }
 
+    /**
+     * Searches for configuration in the given directory, climbs up until workspace root is reached
+     * @param dir directory to search in
+     * @return configuration object to be used for specific directory
+     */
     private JavacConfig doFindConfig(Path dir) {
         while (true) {
             JavacConfig found = JavacConfig.read(dir);
@@ -56,23 +83,39 @@ public class Workspace {
         }
     }
 
-    public Future<JCTree.JCCompilationUnit> getTree(Path path) {
-        return findIndex(path).get(path.toUri());
-    }
-
+    /**
+     * @return all the external defs
+     */
     public Collection<DefSpec> getExternalDefs() {
         return externalDefs;
     }
 
+    /**
+     * Ensures that all indexes are computed, blocks execution
+     * @throws IOException
+     */
     public void computeIndexes() throws IOException {
         Collection<Path> configs = ScanUtil.findMatchingFiles(root, JavacConfig.CONFIG_FILE_NAME);
+        BlockingQueue<Future<SymbolIndex>> queue = new LinkedBlockingQueue<>();
         for (Path config : configs) {
-            findIndex(config);
+            try {
+                queue.put(findIndex(config));
+            } catch (InterruptedException e) {
+                LOGGER.error("Interrupted while computing indexes", e);
+            }
         }
-    }
-
-    public SymbolUnderCursorVisitor getSymbolUnderCursorVisitor(Path sourceFile, long cursor) {
-        SymbolIndex index = findIndex(sourceFile);
-        return index.getSymbolUnderCursorVisitor(sourceFile, cursor);
+        CompletionService<SymbolIndex> completionService =
+                new ExecutorCompletionService<>(executorService, queue);
+        int total = queue.size();
+        boolean errors = false;
+        while (total > 0 && !errors) {
+            try {
+                completionService.take().get();
+            } catch (Exception ex) {
+                LOGGER.error("An error occurred while indexing source files", ex);
+                errors = true;
+            }
+            total--;
+        }
     }
 }

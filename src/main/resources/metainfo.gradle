@@ -236,6 +236,8 @@ allprojects {
 
             if (android) {
 
+                println "SRCLIB-ANDROID 1"
+
                 if (project.hasProperty("android")) {
 
                     if (project.android.hasProperty("sourceSets")) {

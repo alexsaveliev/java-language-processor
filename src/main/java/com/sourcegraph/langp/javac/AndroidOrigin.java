@@ -10,6 +10,9 @@ import java.net.URI;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Translates symbol's origin -> URI for Android libraries
+ */
 class AndroidOrigin {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AndroidOrigin.class);

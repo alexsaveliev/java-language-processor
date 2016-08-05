@@ -29,6 +29,9 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.*;
 
+/**
+ * Tracks definitions and referencs
+ */
 public class SymbolIndex {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolIndex.class);
@@ -54,22 +57,25 @@ public class SymbolIndex {
 
     private JavacConfig config;
 
-    private Executor executor;
+    private ExecutorService executorService;
 
     private Trees trees;
 
     public SymbolIndex(JavacConfig config,
                        Path root,
                        Workspace workspace,
-                       Executor executor) {
+                       ExecutorService executorService) {
 
         this.config = config;
         this.root = root;
         this.workspace = workspace;
-        this.executor = executor;
-        this.executor.execute(new IndexBuilder(root, config));
+        this.executorService = executorService;
     }
 
+    /**
+     * @param symbol local symbol
+     * @return references to a local symbol
+     */
     public Collection<Range> references(Symbol symbol) {
         // For indexed symbols, just look up the precomputed references
 
@@ -125,6 +131,10 @@ public class SymbolIndex {
         return references;
     }
 
+    /**
+     * @param symbol symbol to search for
+     * @return symbol's location
+     */
     public Range findSymbol(Symbol symbol) {
         ElementKind kind = symbol.getKind();
         String key = uniqueName(symbol);
@@ -156,6 +166,9 @@ public class SymbolIndex {
         return null;
     }
 
+    /**
+     * Traverses AST trees and collects references and definitions
+     */
     private class Indexer extends BaseScanner {
 
         private SourceFileIndex index;
@@ -217,6 +230,11 @@ public class SymbolIndex {
             addReference(tree, tree.constructor);
         }
 
+        /**
+         * Adds new definition
+         * @param tree
+         * @param symbol
+         */
         private void addDeclaration(JCTree tree, Symbol symbol) {
             if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
@@ -227,6 +245,11 @@ public class SymbolIndex {
             }
         }
 
+        /**
+         * Adds new reference
+         * @param tree
+         * @param symbol
+         */
         private void addReference(JCTree tree, Symbol symbol) {
             if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
@@ -250,6 +273,10 @@ public class SymbolIndex {
         }
     }
 
+    /**
+     * @param symbol
+     * @return true if we should keep index for a given symbol's kind
+     */
     private static boolean shouldIndex(Symbol symbol) {
         ElementKind kind = symbol.getKind();
 
@@ -271,6 +298,11 @@ public class SymbolIndex {
         }
     }
 
+    /**
+     * @param tree
+     * @param compilationUnit
+     * @return range object for a given node
+     */
     private Range range(JCTree tree, JCTree.JCCompilationUnit compilationUnit) {
         try {
             // Declaration should include offset
@@ -378,6 +410,10 @@ public class SymbolIndex {
         return classSymbol.classfile;
     }
 
+    /**
+     * @param e
+     * @return class symbol for a given element (climbs up if needed)
+     */
     private static Symbol.ClassSymbol forElement(Element e) {
         if (e == null) {
             return null;
@@ -465,7 +501,10 @@ public class SymbolIndex {
         }
     }
 
-    private class IndexBuilder implements Runnable {
+    /**
+     * Schedules building of all indexes
+     */
+    private class IndexBuilder implements Callable<SymbolIndex> {
 
         private Path root;
         private JavacConfig config;
@@ -476,26 +515,16 @@ public class SymbolIndex {
         }
 
         @Override
-        public void run() {
+        public SymbolIndex call() throws Exception {
             LOGGER.info("Building indexes for [{}]", StringUtils.join(config.sources, ' '));
             JavacHolder javacHolder = new JavacHolder(config);
             Iterable<? extends JavaFileObject> sources;
-            try {
-                sources = getSourceFiles(javacHolder.fileManager);
-            } catch (IOException ex) {
-                LOGGER.error("An error occurred while indexing source files", ex);
-                return;
-            }
+            sources = getSourceFiles(javacHolder.fileManager);
             Iterable<? extends CompilationUnitTree> units;
-            try {
-                units = javacHolder.compile(sources);
-            } catch (IOException ex) {
-                LOGGER.error("An error occurred while indexing source files", ex);
-                return;
-            }
+            units = javacHolder.compile(sources);
             trees = javacHolder.trees;
             CompletionService<JCTree.JCCompilationUnit> completionService =
-                    new ExecutorCompletionService<>(executor);
+                    new ExecutorCompletionService<>(executorService);
 
             int total = 0;
             for (CompilationUnitTree unit : units) {
@@ -518,6 +547,7 @@ public class SymbolIndex {
                 }
                 total--;
             }
+            return SymbolIndex.this;
         }
 
         private Iterable<? extends JavaFileObject> getSourceFiles(StandardJavaFileManager fileManager)
@@ -540,6 +570,14 @@ public class SymbolIndex {
 
     public SymbolUnderCursorVisitor getSymbolUnderCursorVisitor(Path sourceFile, long cursor) {
         return new SymbolUnderCursorVisitor(cursor, trees);
+    }
+
+    /**
+     * Starts indexing
+     * @return
+     */
+    public Future<SymbolIndex> index() {
+        return this.executorService.submit(new IndexBuilder(root, config));
     }
 
 }

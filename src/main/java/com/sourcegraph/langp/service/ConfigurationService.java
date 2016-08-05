@@ -47,4 +47,8 @@ public class ConfigurationService {
         jobs.put(workspace, ret);
         return ret;
     }
+
+    public void purge() {
+        jobs.clear();
+    }
 }

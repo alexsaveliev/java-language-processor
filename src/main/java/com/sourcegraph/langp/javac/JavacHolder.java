@@ -17,22 +17,30 @@ import java.util.LinkedList;
 import java.util.stream.Collectors;
 
 /**
- * Maintains a reference to a Java compiler,
- * and several of its internal data structures,
- * which we need to fiddle with to get incremental compilation
- * and extract the diagnostic information we want.
+ * Creates compiler objects and parses/compiles source code
  */
 public class JavacHolder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JavacHolder.class);
 
-
+    /**
+     * Compiler to use
+     */
     private JavaCompiler compiler;
 
+    /**
+     * File manager to use
+     */
     StandardJavaFileManager fileManager;
 
+    /**
+     * Compiler options (javac options)
+     */
     private Collection<String> javacOpts;
 
+    /**
+     * Trees object (to fetch source positions), produced after compilation
+     */
     Trees trees;
 
     public JavacHolder(JavacConfig config) {
@@ -42,6 +50,12 @@ public class JavacHolder {
         javacOpts = getJavacOptions(config, fileManager);
     }
 
+    /**
+     * Compiles all the given sources, produces trees object
+     * @param sources sources to compile
+     * @return AST trees
+     * @throws IOException
+     */
     public Iterable<? extends CompilationUnitTree> compile(Iterable<? extends JavaFileObject> sources)
             throws IOException {
         JavacTask task = (JavacTask) compiler.getTask(null,
@@ -58,6 +72,12 @@ public class JavacHolder {
         return units;
     }
 
+    /**
+     * Assembles javac options
+     * @param config javac configuration (sources, classpath, output)
+     * @param fileManager file manager to use
+     * @return
+     */
     private Collection<String> getJavacOptions(JavacConfig config,
                                                StandardJavaFileManager fileManager) {
         Collection<String> javacOpts = new LinkedList<>();

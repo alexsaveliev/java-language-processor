@@ -59,6 +59,7 @@ public class GradleBuilder {
                 configuration.classPath = new LinkedHashSet<>();
                 configuration.outputDirectory = project.outputDir;
                 configuration.dependencies = project.dependencies;
+                configuration.android = project.android;
                 configurations.put(project.id(), configuration);
             }
 
@@ -236,6 +237,12 @@ public class GradleBuilder {
                                     continue;
                                 }
                                 project.descriptor = payload;
+                                break;
+                            case "SRCLIB-ANDROID":
+                                if (project == null) {
+                                    continue;
+                                }
+                                project.android = true;
                                 break;
                             default:
                                 LOGGER.debug("gradle: {}", line);
@@ -441,6 +448,7 @@ public class GradleBuilder {
         Collection<SourcePathElement> sourceDirs = new LinkedList<>();
         String outputDir;
         String descriptor;
+        boolean android;
 
         String id() {
             return groupId + '/' + artifactId;

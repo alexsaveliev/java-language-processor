@@ -35,9 +35,8 @@ dependencies {
     compile 'org.eclipse.aether:aether-transport-http:1.1.0'
     compile 'org.eclipse.aether:aether-connector-basic:1.1.0'
 
-    compile 'com.google.code.gson:gson:2.3'
-
     compile 'org.eclipse.jgit:org.eclipse.jgit:4.4.1.201607150455-r'
+
     compile files("${System.properties['java.home']}/../lib/tools.jar")
 
 }

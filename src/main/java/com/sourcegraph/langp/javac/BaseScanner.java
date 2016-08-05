@@ -4,7 +4,11 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.List;
 
+/**
+ * Base scanner
+ */
 class BaseScanner extends TreeScanner {
+
     protected JCTree.JCCompilationUnit compilationUnit;
 
     public BaseScanner() {

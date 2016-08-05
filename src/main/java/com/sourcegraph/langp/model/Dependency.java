@@ -7,6 +7,9 @@ public class Dependency {
     public String version;
     public String file;
 
+    public Dependency() {
+    }
+
     public Dependency(String groupID, String artifactID, String version, String file) {
         this.groupID = groupID;
         this.artifactID = artifactID;

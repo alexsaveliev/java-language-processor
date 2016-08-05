@@ -3,7 +3,8 @@ package com.sourcegraph.langp.configuration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import java.util.concurrent.*;
 
 @Configuration
 public class TaskExecutorConfiguration {
@@ -15,12 +16,12 @@ public class TaskExecutorConfiguration {
     private int maxPoolSize;
 
     @Bean
-    public ThreadPoolTaskExecutor taskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(corePoolSize);
-        executor.setMaxPoolSize(corePoolSize);
-        executor.afterPropertiesSet();
-        return executor;
+    public ExecutorService taskExecutor() {
+        return new ThreadPoolExecutor(corePoolSize,
+                maxPoolSize,
+                Integer.MAX_VALUE,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>());
     }
 
 }

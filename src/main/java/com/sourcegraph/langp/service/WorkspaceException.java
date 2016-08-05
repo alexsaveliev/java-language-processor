@@ -1,11 +1,8 @@
 package com.sourcegraph.langp.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import javax.annotation.PostConstruct;
-import java.io.File;
-
+/**
+ * Indicates errors happened while configuring workspace
+ */
 public class WorkspaceException extends Exception {
 
     public WorkspaceException(String message) {

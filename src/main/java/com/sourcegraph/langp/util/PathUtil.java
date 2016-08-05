@@ -2,6 +2,9 @@ package com.sourcegraph.langp.util;
 
 import org.apache.commons.lang3.SystemUtils;
 
+/**
+ * Aux functions for path objects
+ */
 public class PathUtil {
 
     /**

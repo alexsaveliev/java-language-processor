@@ -24,11 +24,17 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Provides foundSymbol resolution methods
+ */
 @Service
 public class SymbolService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolService.class);
 
+    /**
+     * Wait no more than X milliseconds to acquire object
+     */
     @Value("${workspace.get.timeout:250}")
     private long timeout;
 
@@ -40,9 +46,18 @@ public class SymbolService {
 
     private Map<String, Long> offsets = new HashMap<>();
 
+    /**
+     * @param position foundSymbol position
+     * @return hover information for a given foundSymbol
+     * @throws WorkspaceBeingPreparedException if workspace is being prepared
+     * @throws WorkspaceException              if there was error configuring workspace
+     * @throws SymbolException                 if no foundSymbol is found
+     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     */
     public Hover hover(Position position)
             throws WorkspaceBeingPreparedException,
             WorkspaceException,
+            NoDefinitionFoundException,
             SymbolException {
 
         LOGGER.info("Hover {}:{}/{} {}:{}",
@@ -67,71 +82,23 @@ public class SymbolService {
         Hover result = new Hover();
 
         try {
-            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+            SymbolIndex index = getIndex(workspace, sourceFile);
+            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
             if (tree == null) {
                 throw new SymbolException("File does not exist");
             }
             long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
+            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
                 Symbol symbol = visitor.found.get();
-                Collection<HoverContent> contents = new LinkedList<>();
-
-                String text = tree.docComments.getCommentText(visitor.foundTree);
-                if (text != null) {
-                    contents.add(new HoverContent(text));
-                } else {
-
-                    switch (symbol.getKind()) {
-                        case PACKAGE:
-                            contents.add(new HoverContent("package " + symbol.getQualifiedName()));
-
-                            break;
-                        case ENUM:
-                            contents.add(new HoverContent("enum " + symbol.getQualifiedName()));
-
-                            break;
-                        case CLASS:
-                            contents.add(new HoverContent("class " + symbol.getQualifiedName()));
-
-                            break;
-                        case ANNOTATION_TYPE:
-                            contents.add(new HoverContent("@interface " + symbol.getQualifiedName()));
-
-                            break;
-                        case INTERFACE:
-                            contents.add(new HoverContent("interface " + symbol.getQualifiedName()));
-
-                            break;
-                        case METHOD:
-                        case CONSTRUCTOR:
-                        case STATIC_INIT:
-                        case INSTANCE_INIT:
-                            Symbol.MethodSymbol method = (Symbol.MethodSymbol) symbol;
-                            String signature = ShortTypePrinter.methodSignature(method);
-                            String returnType = ShortTypePrinter.print(method.getReturnType());
-
-                            contents.add(new HoverContent(returnType + " " + signature));
-
-                            break;
-                        case PARAMETER:
-                        case LOCAL_VARIABLE:
-                        case EXCEPTION_PARAMETER:
-                        case ENUM_CONSTANT:
-                        case FIELD:
-                            contents.add(new HoverContent(ShortTypePrinter.print(symbol.type)));
-
-                            break;
-                        case TYPE_PARAMETER:
-                        case OTHER:
-                        case RESOURCE_VARIABLE:
-                            break;
-                    }
-                }
-                result.setContents(contents);
+                result.setContents(getHoverContents(tree, visitor.foundTree, symbol));
+            } else {
+                throw new NoDefinitionFoundException();
             }
+        } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException | WorkspaceException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for hover {}:{}/{} {}:{}",
                     position.getRepo(),
@@ -145,6 +112,14 @@ public class SymbolService {
         return result;
     }
 
+    /**
+     * @param position foundSymbol position
+     * @return foundSymbol's local definition
+     * @throws WorkspaceBeingPreparedException if workspace is being prepared
+     * @throws WorkspaceException              if there was error configuring workspace
+     * @throws SymbolException                 if no foundSymbol is found
+     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     */
     public Range definition(Position position) throws
             WorkspaceBeingPreparedException,
             WorkspaceException,
@@ -170,19 +145,16 @@ public class SymbolService {
         }
 
         try {
-            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+            SymbolIndex index = getIndex(workspace, sourceFile);
+            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
             if (tree == null) {
                 throw new SymbolException("File does not exist");
             }
             long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
+            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
-                SymbolIndex index = workspace.findIndex(sourceFile);
-                if (index == null) {
-                    throw new NoDefinitionFoundException();
-                }
                 Range range = index.findSymbol(visitor.found.get());
                 if (range == null) {
                     throw new NoDefinitionFoundException();
@@ -191,7 +163,7 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException | SymbolException | WorkspaceException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for definition {}:{}/{} {}:{}",
@@ -205,6 +177,14 @@ public class SymbolService {
         }
     }
 
+    /**
+     * @param position foundSymbol position
+     * @return local references to specific foundSymbol
+     * @throws WorkspaceBeingPreparedException if workspace is being prepared
+     * @throws WorkspaceException              if there was error configuring workspace
+     * @throws SymbolException                 if no foundSymbol is found
+     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     */
     public LocalRefs localRefs(Position position) throws
             WorkspaceBeingPreparedException,
             WorkspaceException,
@@ -232,20 +212,19 @@ public class SymbolService {
         ret.setRefs(new LinkedList<>());
         try {
             workspace.computeIndexes();
-            JCTree.JCCompilationUnit tree = getTree(workspace, sourceFile);
+
+            SymbolIndex index = getIndex(workspace, sourceFile);
+            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
+
             if (tree == null) {
                 throw new SymbolException("File does not exist");
             }
 
             long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = workspace.getSymbolUnderCursorVisitor(sourceFile, cursor);
+            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
-                SymbolIndex index = workspace.findIndex(sourceFile);
-                if (index == null) {
-                    throw new NoDefinitionFoundException();
-                }
                 Range range = index.findSymbol(visitor.found.get());
                 if (range == null) {
                     throw new NoDefinitionFoundException();
@@ -256,7 +235,7 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException e) {
+        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException | WorkspaceException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for local refs {}:{}/{} {}:{}",
@@ -270,6 +249,12 @@ public class SymbolService {
         }
     }
 
+    /**
+     * @param repoRev repository and revision
+     * @return all external references from given repository
+     * @throws WorkspaceException              if there was error configuring workspace
+     * @throws SymbolException                 if no foundSymbol is found
+     */
     public ExternalRefs externalRefs(RepoRev repoRev)
             throws WorkspaceException,
             SymbolException {
@@ -300,6 +285,12 @@ public class SymbolService {
         }
     }
 
+    /**
+     * @param file source file
+     * @param targetLine line
+     * @param targetCharacter character
+     * @return line:character mapped to character-based offset. Lookup is performed in the cache first
+     */
     private long findOffset(Path file, int targetLine, int targetCharacter) {
         String id = file.toString() + ':' + targetLine + ':' + targetCharacter;
         Long offset = offsets.get(id);
@@ -314,6 +305,15 @@ public class SymbolService {
         return offset;
     }
 
+    /**
+     *
+     * Computes character-based offset for specific line and column
+     * @param file source file
+     * @param targetLine line
+     * @param targetCharacter character
+     * @return line:character mapped to character-based offset
+     * @throws IOException
+     */
     private long computeOffset(Path file,
                                int targetLine,
                                int targetCharacter) throws IOException {
@@ -350,31 +350,140 @@ public class SymbolService {
         }
     }
 
+    /**
+     * Waits for N milliseconds to acquire workspace object
+     * @param repo repository
+     * @param commit revision
+     * @return workspace object if ready
+     * @throws WorkspaceBeingPreparedException if workspace object is being prepared
+     * @throws WorkspaceException if workspace configuration error occurred
+     */
     private File getWorkspace(String repo, String commit)
             throws WorkspaceBeingPreparedException, WorkspaceException {
         Future<File> workspaceRoot = repositoryService.getRepository(repo, commit);
         try {
             return workspaceRoot.get(timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred", e);
+            LOGGER.error("An error occurred while fetching workspace for {}@{}", repo, commit, e);
             throw new WorkspaceException(e);
         } catch (TimeoutException e) {
             throw new WorkspaceBeingPreparedException();
         }
     }
 
-    private JCTree.JCCompilationUnit getTree(Workspace workspace, Path path)
+    /**
+     * Waits for N milliseconds to acquire tree object
+     * @param index foundSymbol index
+     * @param path file path
+     * @return tree object if ready
+     * @throws WorkspaceBeingPreparedException if tree object is being prepared
+     * @throws WorkspaceException if workspace configuration error occurred
+     */
+    private JCTree.JCCompilationUnit getTree(SymbolIndex index, Path path)
             throws WorkspaceBeingPreparedException, WorkspaceException {
-        Future<JCTree.JCCompilationUnit> future = workspace.getTree(path);
+        Future<JCTree.JCCompilationUnit> future = index.get(path.toUri());
         if (future == null) {
-            throw new WorkspaceBeingPreparedException();}
+            throw new WorkspaceBeingPreparedException();
+        }
         try {
             return future.get(timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred", e);
+            LOGGER.error("An error occurred while fetching tree for {}", path, e);
             throw new WorkspaceException(e);
         } catch (TimeoutException e) {
             throw new WorkspaceBeingPreparedException();
         }
     }
+
+    /**
+     * Waits for N milliseconds to acquire index object
+     * @param workspace workspace
+     * @param path file path
+     * @return index object if ready
+     * @throws WorkspaceBeingPreparedException if index object is being prepared
+     * @throws WorkspaceException if workspace configuration error occurred
+     */
+    private SymbolIndex getIndex(Workspace workspace, Path path)
+            throws WorkspaceBeingPreparedException, WorkspaceException {
+        Future<SymbolIndex> future = workspace.findIndex(path);
+        if (future == null) {
+            throw new WorkspaceBeingPreparedException();
+        }
+        try {
+            return future.get(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.error("An error occurred while fetching index for {}", path, e);
+            throw new WorkspaceException(e);
+        } catch (TimeoutException e) {
+            throw new WorkspaceBeingPreparedException();
+        }
+    }
+
+    /**
+     *
+     * @param tree compilation unit
+     * @param foundTree found AST node
+     * @param foundSymbol found symbol
+     * @return hover content for specific symbol
+     */
+    private Collection<HoverContent> getHoverContents(JCTree.JCCompilationUnit tree,
+                                                      JCTree foundTree,
+                                                      Symbol foundSymbol) {
+        Collection<HoverContent> contents = new LinkedList<>();
+
+        String text = tree.docComments.getCommentText(foundTree);
+        if (text != null) {
+            contents.add(new HoverContent(text));
+        } else {
+
+            switch (foundSymbol.getKind()) {
+                case PACKAGE:
+                    contents.add(new HoverContent("package " + foundSymbol.getQualifiedName()));
+
+                    break;
+                case ENUM:
+                    contents.add(new HoverContent("enum " + foundSymbol.getQualifiedName()));
+
+                    break;
+                case CLASS:
+                    contents.add(new HoverContent("class " + foundSymbol.getQualifiedName()));
+
+                    break;
+                case ANNOTATION_TYPE:
+                    contents.add(new HoverContent("@interface " + foundSymbol.getQualifiedName()));
+
+                    break;
+                case INTERFACE:
+                    contents.add(new HoverContent("interface " + foundSymbol.getQualifiedName()));
+
+                    break;
+                case METHOD:
+                case CONSTRUCTOR:
+                case STATIC_INIT:
+                case INSTANCE_INIT:
+                    Symbol.MethodSymbol method = (Symbol.MethodSymbol) foundSymbol;
+                    String signature = ShortTypePrinter.methodSignature(method);
+                    String returnType = ShortTypePrinter.print(method.getReturnType());
+
+                    contents.add(new HoverContent(returnType + " " + signature));
+
+                    break;
+                case PARAMETER:
+                case LOCAL_VARIABLE:
+                case EXCEPTION_PARAMETER:
+                case ENUM_CONSTANT:
+                case FIELD:
+                    contents.add(new HoverContent(ShortTypePrinter.print(foundSymbol.type)));
+
+                    break;
+                case TYPE_PARAMETER:
+                case OTHER:
+                case RESOURCE_VARIABLE:
+                    break;
+            }
+        }
+        return contents;
+    }
+
+
 }

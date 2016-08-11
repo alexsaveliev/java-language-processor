@@ -180,13 +180,11 @@ public class SymbolService {
     /**
      * @param position foundSymbol position
      * @return local references to specific foundSymbol
-     * @throws WorkspaceBeingPreparedException if workspace is being prepared
-     * @throws WorkspaceException              if there was error configuring workspace
-     * @throws SymbolException                 if no foundSymbol is found
-     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     * @throws WorkspaceException         if there was error configuring workspace
+     * @throws SymbolException            if no foundSymbol is found
+     * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
     public LocalRefs localRefs(Position position) throws
-            WorkspaceBeingPreparedException,
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -198,7 +196,14 @@ public class SymbolService {
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
+        Path root;
+        try {
+            root = repositoryService.getRepository(position.getRepo(), position.getCommit()).get().toPath();
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.error("An error occurred while fetching repository {}@{}",
+                    position.getRepo(), position.getCommit(), e);
+            throw new WorkspaceException(e);
+        }
         Workspace workspace = workspaceService.getWorkspace(root);
         Path sourceFile = root.resolve(position.getFile());
         if (!sourceFile.startsWith(root)) {
@@ -235,7 +240,7 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException | WorkspaceException e) {
+        } catch (NoDefinitionFoundException | SymbolException | WorkspaceException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for local refs {}:{}/{} {}:{}",
@@ -252,8 +257,8 @@ public class SymbolService {
     /**
      * @param repoRev repository and revision
      * @return all external references from given repository
-     * @throws WorkspaceException              if there was error configuring workspace
-     * @throws SymbolException                 if no foundSymbol is found
+     * @throws WorkspaceException if there was error configuring workspace
+     * @throws SymbolException    if no foundSymbol is found
      */
     public ExternalRefs externalRefs(RepoRev repoRev)
             throws WorkspaceException,
@@ -286,8 +291,45 @@ public class SymbolService {
     }
 
     /**
-     * @param file source file
-     * @param targetLine line
+     * @param repoRev repository and revision
+     * @return all exported symbols from given repository
+     * @throws WorkspaceException if there was error configuring workspace
+     * @throws SymbolException    if no foundSymbol is found
+     */
+    public ExternalRefs exportedSymbols(RepoRev repoRev)
+            throws WorkspaceException,
+            SymbolException {
+
+        LOGGER.info("Exported symbols {}:{}",
+                repoRev.getRepo(),
+                repoRev.getCommit());
+
+        Path root;
+        try {
+            root = repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit()).get().toPath();
+        } catch (InterruptedException | ExecutionException e) {
+            throw new WorkspaceException(e);
+        }
+
+        try {
+            Workspace workspace = workspaceService.getWorkspace(root);
+            workspace.computeIndexes();
+            ExternalRefs ret = new ExternalRefs();
+            ret.setDefs(workspace.getExportedSymbols());
+            return ret;
+        } catch (Exception e) {
+            LOGGER.info("An error occurred while looking for exported symbols {}:{}",
+                    repoRev.getRepo(),
+                    repoRev.getCommit(),
+                    e);
+            throw new SymbolException(e.getMessage());
+        }
+    }
+
+
+    /**
+     * @param file            source file
+     * @param targetLine      line
      * @param targetCharacter character
      * @return line:character mapped to character-based offset. Lookup is performed in the cache first
      */
@@ -306,10 +348,10 @@ public class SymbolService {
     }
 
     /**
-     *
      * Computes character-based offset for specific line and column
-     * @param file source file
-     * @param targetLine line
+     *
+     * @param file            source file
+     * @param targetLine      line
      * @param targetCharacter character
      * @return line:character mapped to character-based offset
      * @throws IOException
@@ -352,11 +394,12 @@ public class SymbolService {
 
     /**
      * Waits for N milliseconds to acquire workspace object
-     * @param repo repository
+     *
+     * @param repo   repository
      * @param commit revision
      * @return workspace object if ready
      * @throws WorkspaceBeingPreparedException if workspace object is being prepared
-     * @throws WorkspaceException if workspace configuration error occurred
+     * @throws WorkspaceException              if workspace configuration error occurred
      */
     private File getWorkspace(String repo, String commit)
             throws WorkspaceBeingPreparedException, WorkspaceException {
@@ -373,11 +416,12 @@ public class SymbolService {
 
     /**
      * Waits for N milliseconds to acquire tree object
+     *
      * @param index foundSymbol index
-     * @param path file path
+     * @param path  file path
      * @return tree object if ready
      * @throws WorkspaceBeingPreparedException if tree object is being prepared
-     * @throws WorkspaceException if workspace configuration error occurred
+     * @throws WorkspaceException              if workspace configuration error occurred
      */
     private JCTree.JCCompilationUnit getTree(SymbolIndex index, Path path)
             throws WorkspaceBeingPreparedException, WorkspaceException {
@@ -397,11 +441,12 @@ public class SymbolService {
 
     /**
      * Waits for N milliseconds to acquire index object
+     *
      * @param workspace workspace
-     * @param path file path
+     * @param path      file path
      * @return index object if ready
      * @throws WorkspaceBeingPreparedException if index object is being prepared
-     * @throws WorkspaceException if workspace configuration error occurred
+     * @throws WorkspaceException              if workspace configuration error occurred
      */
     private SymbolIndex getIndex(Workspace workspace, Path path)
             throws WorkspaceBeingPreparedException, WorkspaceException {
@@ -420,9 +465,8 @@ public class SymbolService {
     }
 
     /**
-     *
-     * @param tree compilation unit
-     * @param foundTree found AST node
+     * @param tree        compilation unit
+     * @param foundTree   found AST node
      * @param foundSymbol found symbol
      * @return hover content for specific symbol
      */

@@ -132,6 +132,23 @@ public class SymbolIndex {
     }
 
     /**
+     * @return all local definitions
+     */
+    public Collection<DefSpec> definitions() {
+        Collection<DefSpec> ret = new LinkedList<>();
+        for (SourceFileIndex index : sourcePath.values()) {
+            for (Map<String, ?> withKind : index.declarations.values()) {
+                for (String path : withKind.keySet()) {
+                    DefSpec spec = new DefSpec();
+                    spec.setPath(path);
+                    ret.add(spec);
+                }
+            }
+        }
+        return ret;
+    }
+
+    /**
      * @param symbol symbol to search for
      * @return symbol's location
      */
@@ -232,6 +249,7 @@ public class SymbolIndex {
 
         /**
          * Adds new definition
+         *
          * @param tree
          * @param symbol
          */
@@ -247,6 +265,7 @@ public class SymbolIndex {
 
         /**
          * Adds new reference
+         *
          * @param tree
          * @param symbol
          */
@@ -574,6 +593,7 @@ public class SymbolIndex {
 
     /**
      * Starts indexing
+     *
      * @return
      */
     public Future<SymbolIndex> index() {

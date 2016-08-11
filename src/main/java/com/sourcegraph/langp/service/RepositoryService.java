@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.io.File;
-import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,13 +59,24 @@ public class RepositoryService {
      */
     @Async
     public Future<File> getRepository(String repo, String commit) {
+        return getRepository(repo, commit, false);
+    }
+
+    /**
+     * @param repo   repository name (github.com/user/repo)
+     * @param commit revision
+     * @param update indicates if we should force update
+     * @return directory that contains cloned repository, cloning and configuring happen asynchronously
+     */
+    @Async
+    public Future<File> getRepository(String repo, String commit, boolean update) {
         File workspace = new File(new File(root, repo), commit);
-        Future<File> current = jobs.get(workspace);
+        Future<File> current = !update ? jobs.get(workspace) : null;
         if (current != null) {
             return current;
         }
         Future<File> future = taskExecutorConfiguration.taskExecutor().
-                submit(new PrepareRepository(workspace, repo, commit));
+                submit(new PrepareRepository(workspace, repo, commit, update));
         jobs.put(workspace, future);
         return future;
     }
@@ -90,9 +100,13 @@ public class RepositoryService {
     /**
      * Cleanups all repositories
      *
-     * @throws IOException
+     * @throws Exception
      */
-    public void purge() throws IOException {
+    public void purge() throws Exception {
+        // park all
+        for (Future<?> future : jobs.values()) {
+            future.get();
+        }
         jobs.clear();
         FileUtils.cleanDirectory(root);
         configurationService.purge();
@@ -118,16 +132,26 @@ public class RepositoryService {
          */
         private String commit;
 
-        private PrepareRepository(File workspace, String repo, String commit) {
+        private boolean update;
+
+        private PrepareRepository(File workspace, String repo, String commit, boolean update) {
             this.workspace = workspace;
             this.repo = repo;
             this.commit = commit;
+            this.update = update;
         }
 
         @Override
         public File call() throws Exception {
             // if workspace already exists and is directory - it's supposed to be ready
             if (workspace.isDirectory()) {
+                if (update) {
+                    try {
+                        return configurationService.configure(workspace, true).get();
+                    } catch (InterruptedException | ExecutionException e) {
+                        LOGGER.warn("Failed to configure workspace {}", workspace, e);
+                    }
+                }
                 return workspace;
             }
             if (workspace.isFile()) {

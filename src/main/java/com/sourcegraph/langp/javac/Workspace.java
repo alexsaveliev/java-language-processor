@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -88,6 +89,22 @@ public class Workspace {
      */
     public Collection<DefSpec> getExternalDefs() {
         return externalDefs;
+    }
+
+    /**
+     * @return all the exported symbols
+     */
+    public Collection<DefSpec> getExportedSymbols() {
+        Collection<DefSpec> ret = new LinkedList<>();
+        for (Future<SymbolIndex> futureIndex : indexCache.values()) {
+            try {
+                SymbolIndex index = futureIndex.get();
+                ret.addAll(index.definitions());
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.error("An error occurred while computing index", e);
+            }
+        }
+        return ret;
     }
 
     /**

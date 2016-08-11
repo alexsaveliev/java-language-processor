@@ -1,8 +1,10 @@
 package com.sourcegraph.langp.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.commons.lang3.StringUtils;
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class Range extends RepoRev {
 
     @JsonProperty(value="File")

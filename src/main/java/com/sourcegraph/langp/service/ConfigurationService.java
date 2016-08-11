@@ -27,7 +27,12 @@ public class ConfigurationService {
 
     @Async
     public Future<File> configure(File workspace) {
-        Future<File> current = jobs.get(workspace);
+        return configure(workspace, false);
+    }
+
+    @Async
+    public Future<File> configure(File workspace, boolean update) {
+        Future<File> current = update ? null : jobs.get(workspace);
         if (current != null) {
             return current;
         }
@@ -48,7 +53,11 @@ public class ConfigurationService {
         return ret;
     }
 
-    public void purge() {
+    public void purge() throws Exception {
+        // park all
+        for (Future<?> future : jobs.values()) {
+            future.get();
+        }
         jobs.clear();
     }
 }

@@ -26,6 +26,16 @@ public class LanguageProcessorController {
     @Autowired
     private SymbolService symbolService;
 
+    @PostMapping(value = "/prepare")
+    public void prepare(@Valid @RequestBody RepoRev repoRev, HttpServletResponse response)
+            throws WorkspaceBeingPreparedException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
+        repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit(), true);
+        response.setStatus(HttpServletResponse.SC_ACCEPTED);
+    }
+
     @PostMapping(value = "/definition")
     public Range definition(@Valid @RequestBody Position pos)
             throws WorkspaceBeingPreparedException,
@@ -46,8 +56,7 @@ public class LanguageProcessorController {
 
     @PostMapping(value = "/local-refs")
     public LocalRefs localRefs(@Valid @RequestBody Position pos)
-            throws WorkspaceBeingPreparedException,
-            WorkspaceException,
+            throws WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
         return symbolService.localRefs(pos);
@@ -55,10 +64,14 @@ public class LanguageProcessorController {
 
     @PostMapping(value = "/external-refs")
     public ExternalRefs externalRefs(@Valid @RequestBody RepoRev repoRev)
-            throws WorkspaceBeingPreparedException,
-            WorkspaceException,
-            SymbolException {
+            throws WorkspaceException, SymbolException {
         return symbolService.externalRefs(repoRev);
+    }
+
+    @PostMapping(value = "/exported-symbols")
+    public ExternalRefs exportedSymbols(@Valid @RequestBody RepoRev repoRev)
+            throws WorkspaceException, SymbolException {
+        return symbolService.exportedSymbols(repoRev);
     }
 
     @ExceptionHandler({WorkspaceBeingPreparedException.class})

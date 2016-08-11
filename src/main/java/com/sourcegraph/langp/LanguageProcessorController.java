@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 import java.io.IOException;
+import java.nio.file.Path;
 
 @RestController
 //@SuppressWarnings("unused")
@@ -42,7 +43,8 @@ public class LanguageProcessorController {
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
-        return symbolService.definition(pos);
+        Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
+        return symbolService.definition(root, pos);
     }
 
     @PostMapping(value = "/hover")
@@ -51,7 +53,8 @@ public class LanguageProcessorController {
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
-        return symbolService.hover(pos);
+        Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
+        return symbolService.hover(root, pos);
     }
 
     @PostMapping(value = "/local-refs")
@@ -95,4 +98,5 @@ public class LanguageProcessorController {
         Error error = new Error(ex.getMessage());
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
+
 }

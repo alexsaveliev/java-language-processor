@@ -64,7 +64,8 @@ public class SymbolServiceTest {
         position.setLine(14);
         position.setCharacter(19);
         try {
-            symbolService.hover(position);
+            symbolService.hover(repositoryService.getWorkspace(position.getRepo(), position.getCommit()).toPath(),
+                    position);
         } catch (WorkspaceBeingPreparedException e) {
             return;
         }
@@ -86,7 +87,9 @@ public class SymbolServiceTest {
         position.setFile("src/main/java/mypkg/FooClass.java");
         position.setLine(14);
         position.setCharacter(19);
-        Hover hover = symbolService.hover(position);
+        Hover hover = symbolService.hover(repositoryService.getWorkspace(position.getRepo(),
+                position.getCommit()).toPath(),
+                position);
         assertNotNull(hover);
         assertEquals("wrong number of content", 1, hover.getContents().size());
         HoverContent content = hover.getContents().iterator().next();
@@ -111,7 +114,8 @@ public class SymbolServiceTest {
         position.setLine(14);
         position.setCharacter(19);
         try {
-            symbolService.definition(position);
+            symbolService.definition(repositoryService.getWorkspace(position.getRepo(), position.getCommit()).toPath(),
+                    position);
         } catch (WorkspaceBeingPreparedException e) {
             return;
         }
@@ -133,7 +137,9 @@ public class SymbolServiceTest {
         position.setFile("src/main/java/mypkg/subpkg/ZipClass.java");
         position.setLine(6);
         position.setCharacter(29);
-        Range definition = symbolService.definition(position);
+        Range definition = symbolService.definition(repositoryService.getWorkspace(position.getRepo(),
+                position.getCommit()).toPath(),
+                position);
         assertNotNull(definition);
         assertEquals("unexpected definition file", "src/main/java/mypkg/FooClass.java", definition.getFile());
         assertEquals("unexpected definition start line", 14, definition.getStartLine());
@@ -160,7 +166,8 @@ public class SymbolServiceTest {
         assertNotNull(refs);
         Collection<Range> expected = new ObjectMapper().
                 readValue(this.getClass().getResourceAsStream("/data/local-refs.json"),
-                new TypeReference<List<Range>>(){});
+                        new TypeReference<List<Range>>() {
+                        });
         assertEquals("unexpected refs", new HashSet<>(expected), new HashSet<>(refs.getRefs()));
     }
 
@@ -179,7 +186,8 @@ public class SymbolServiceTest {
         assertNotNull(refs);
         Collection<DefSpec> expected = new ObjectMapper().
                 readValue(this.getClass().getResourceAsStream("/data/external-refs.json"),
-                        new TypeReference<List<DefSpec>>(){});
+                        new TypeReference<List<DefSpec>>() {
+                        });
         assertEquals("unexpected refs", new HashSet<>(expected), new HashSet<>(refs.getDefs()));
     }
 

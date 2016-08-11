@@ -17,10 +17,7 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import java.io.File;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 /**
  * This service manages repositories (clones, configures them)
@@ -41,6 +38,13 @@ public class RepositoryService {
      */
     @Value("${workspace:${SGPATH:${user.home}/.sourcegraph}/workspace/java}")
     private String workspace;
+
+    /**
+     * Wait no more than X milliseconds to acquire object
+     */
+    @Value("${workspace.get.timeout:250}")
+    private long timeout;
+
 
     /**
      * Root directory where all repositories are located
@@ -111,6 +115,30 @@ public class RepositoryService {
         FileUtils.cleanDirectory(root);
         configurationService.purge();
     }
+
+    /**
+     * Waits for N milliseconds to acquire workspace object
+     *
+     * @param repo   repository
+     * @param commit revision
+     * @return workspace object if ready
+     * @throws WorkspaceBeingPreparedException if workspace object is being prepared
+     * @throws WorkspaceException              if workspace configuration error occurred
+     */
+    public File getWorkspace(String repo, String commit)
+            throws WorkspaceBeingPreparedException, WorkspaceException {
+        Future<File> workspaceRoot = getRepository(repo, commit);
+        try {
+            return workspaceRoot.get(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException | ExecutionException e) {
+            LOGGER.error("An error occurred while fetching workspace for {}@{}", repo, commit, e);
+            throw new WorkspaceException(e);
+        } catch (TimeoutException e) {
+            throw new WorkspaceBeingPreparedException();
+        }
+    }
+
+
 
     /**
      * Repository preparation task (clone + configure)

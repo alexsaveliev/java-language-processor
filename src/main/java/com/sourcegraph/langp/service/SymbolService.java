@@ -10,7 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -47,27 +46,23 @@ public class SymbolService {
     private Map<String, Long> offsets = new HashMap<>();
 
     /**
-     * @param position foundSymbol position
-     * @return hover information for a given foundSymbol
-     * @throws WorkspaceBeingPreparedException if workspace is being prepared
-     * @throws WorkspaceException              if there was error configuring workspace
-     * @throws SymbolException                 if no foundSymbol is found
-     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     * @param root     workspace root
+     * @param position symbol position
+     * @return hover information for a given symbol
+     * @throws SymbolException            if no foundSymbol is found
+     * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
-    public Hover hover(Position position)
-            throws WorkspaceBeingPreparedException,
-            WorkspaceException,
-            NoDefinitionFoundException,
+    public Hover hover(Path root,
+                       Position position)
+            throws NoDefinitionFoundException,
             SymbolException {
 
-        LOGGER.info("Hover {}:{}/{} {}:{}",
-                position.getRepo(),
-                position.getCommit(),
+        LOGGER.info("Hover {}/{} {}:{}",
+                root,
                 position.getFile(),
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
         Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
@@ -97,12 +92,11 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException | WorkspaceException e) {
+        } catch (SymbolException | NoDefinitionFoundException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for hover {}:{}/{} {}:{}",
-                    position.getRepo(),
-                    position.getCommit(),
+            LOGGER.info("An error occurred while looking for hover {}/{} {}:{}",
+                    root,
                     position.getFile(),
                     position.getLine(),
                     position.getCharacter(),
@@ -113,27 +107,23 @@ public class SymbolService {
     }
 
     /**
-     * @param position foundSymbol position
-     * @return foundSymbol's local definition
-     * @throws WorkspaceBeingPreparedException if workspace is being prepared
-     * @throws WorkspaceException              if there was error configuring workspace
-     * @throws SymbolException                 if no foundSymbol is found
-     * @throws NoDefinitionFoundException      if there is no foundSymbol at specific position
+     * @param root     workspace root
+     * @param position symbol position
+     * @return symbol's local definition
+     * @throws SymbolException            if no foundSymbol is found
+     * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
-    public Range definition(Position position) throws
-            WorkspaceBeingPreparedException,
-            WorkspaceException,
+    public Range definition(Path root,
+                            Position position) throws
             SymbolException,
             NoDefinitionFoundException {
 
-        LOGGER.info("Definition {}:{}/{} {}:{}",
-                position.getRepo(),
-                position.getCommit(),
+        LOGGER.info("Definition {}/{} {}:{}",
+                root,
                 position.getFile(),
                 position.getLine(),
                 position.getCharacter());
 
-        Path root = getWorkspace(position.getRepo(), position.getCommit()).toPath();
         Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
@@ -163,12 +153,11 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException | SymbolException | WorkspaceException e) {
+        } catch (NoDefinitionFoundException | SymbolException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for definition {}:{}/{} {}:{}",
-                    position.getRepo(),
-                    position.getCommit(),
+            LOGGER.info("An error occurred while looking for definition {}/{} {}:{}",
+                    root,
                     position.getFile(),
                     position.getLine(),
                     position.getCharacter(),
@@ -389,28 +378,6 @@ public class SymbolService {
             }
 
             return offset;
-        }
-    }
-
-    /**
-     * Waits for N milliseconds to acquire workspace object
-     *
-     * @param repo   repository
-     * @param commit revision
-     * @return workspace object if ready
-     * @throws WorkspaceBeingPreparedException if workspace object is being prepared
-     * @throws WorkspaceException              if workspace configuration error occurred
-     */
-    private File getWorkspace(String repo, String commit)
-            throws WorkspaceBeingPreparedException, WorkspaceException {
-        Future<File> workspaceRoot = repositoryService.getRepository(repo, commit);
-        try {
-            return workspaceRoot.get(timeout, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred while fetching workspace for {}@{}", repo, commit, e);
-            throw new WorkspaceException(e);
-        } catch (TimeoutException e) {
-            throw new WorkspaceBeingPreparedException();
         }
     }
 

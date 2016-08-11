@@ -5,8 +5,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.filter.CommonsRequestLoggingFilter;
 
-import javax.servlet.http.HttpServletRequest;
-
 @SpringBootApplication
 public class Application {
 

@@ -1,0 +1,21 @@
+<ehcache:config
+        xmlns:ehcache='http://www.ehcache.org/v3'>
+
+    <ehcache:thread-pools>
+        <ehcache:thread-pool alias="theone" min-size="1" max-size="4"/>
+    </ehcache:thread-pools>
+    <ehcache:event-dispatch thread-pool="pool-dispatch"/>
+    <ehcache:disk-store thread-pool="pool-disk"/>
+
+    <ehcache:cache alias="workspaces">
+        <ehcache:resources>
+            <ehcache:heap unit="GB">1</ehcache:heap>
+            <ehcache:disk unit="GB" persistent="true">100</ehcache:disk>
+        </ehcache:resources>
+        <ehcache:heap-store-settings>
+            <ehcache:max-object-graph-size>10</ehcache:max-object-graph-size>
+            <ehcache:max-object-size unit="MB">100</ehcache:max-object-size>
+        </ehcache:heap-store-settings>
+        <ehcache:disk-store-settings thread-pool="pool-disk" writer-concurrency="10"/>
+    </ehcache:cache>
+</ehcache:config>

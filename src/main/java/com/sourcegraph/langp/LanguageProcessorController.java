@@ -72,7 +72,7 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/exported-symbols")
-    public ExternalRefs exportedSymbols(@Valid @RequestBody RepoRev repoRev)
+    public ExportedSymbols exportedSymbols(@Valid @RequestBody RepoRev repoRev)
             throws WorkspaceException, SymbolException {
         return symbolService.exportedSymbols(repoRev);
     }

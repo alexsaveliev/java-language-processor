@@ -2,18 +2,27 @@ package com.sourcegraph.langp.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Collection;
-
 public class Hover {
 
-    @JsonProperty(value="Contents")
-    private Collection<HoverContent> contents;
+    @JsonProperty(value="Title")
+    private String title;
 
-    public Collection<HoverContent> getContents() {
-        return contents;
+    @JsonProperty(value="DocHTML")
+    private String docHtml;
+
+    public String getTitle() {
+        return title;
     }
 
-    public void setContents(Collection<HoverContent> contents) {
-        this.contents = contents;
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDocHtml() {
+        return docHtml;
+    }
+
+    public void setDocHtml(String docHtml) {
+        this.docHtml = docHtml;
     }
 }

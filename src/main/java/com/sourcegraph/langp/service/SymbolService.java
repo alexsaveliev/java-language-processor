@@ -14,7 +14,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -55,7 +54,8 @@ public class SymbolService {
     public Hover hover(Path root,
                        Position position)
             throws NoDefinitionFoundException,
-            SymbolException {
+            SymbolException,
+            WorkspaceBeingPreparedException {
 
         LOGGER.info("Hover {}/{} {}:{}",
                 root,
@@ -74,8 +74,6 @@ public class SymbolService {
         }
 
 
-        Hover result = new Hover();
-
         try {
             SymbolIndex index = getIndex(workspace, sourceFile);
             JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
@@ -88,11 +86,11 @@ public class SymbolService {
 
             if (visitor.found.isPresent()) {
                 Symbol symbol = visitor.found.get();
-                result.setContents(getHoverContents(tree, visitor.foundTree, symbol));
+                return getHover(tree, visitor.foundTree, symbol);
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (SymbolException | NoDefinitionFoundException e) {
+        } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for hover {}/{} {}:{}",
@@ -103,7 +101,6 @@ public class SymbolService {
                     e);
             throw new SymbolException(e.getMessage());
         }
-        return result;
     }
 
     /**
@@ -116,7 +113,8 @@ public class SymbolService {
     public Range definition(Path root,
                             Position position) throws
             SymbolException,
-            NoDefinitionFoundException {
+            NoDefinitionFoundException,
+            WorkspaceBeingPreparedException {
 
         LOGGER.info("Definition {}/{} {}:{}",
                 root,
@@ -153,7 +151,7 @@ public class SymbolService {
             } else {
                 throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException | SymbolException e) {
+        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for definition {}/{} {}:{}",
@@ -285,7 +283,7 @@ public class SymbolService {
      * @throws WorkspaceException if there was error configuring workspace
      * @throws SymbolException    if no foundSymbol is found
      */
-    public ExternalRefs exportedSymbols(RepoRev repoRev)
+    public ExportedSymbols exportedSymbols(RepoRev repoRev)
             throws WorkspaceException,
             SymbolException {
 
@@ -303,8 +301,8 @@ public class SymbolService {
         try {
             Workspace workspace = workspaceService.getWorkspace(root);
             workspace.computeIndexes();
-            ExternalRefs ret = new ExternalRefs();
-            ret.setDefs(workspace.getExportedSymbols());
+            ExportedSymbols ret = new ExportedSymbols();
+            ret.setSymbols(workspace.getExportedSymbols());
             return ret;
         } catch (Exception e) {
             LOGGER.info("An error occurred while looking for exported symbols {}:{}",
@@ -437,63 +435,63 @@ public class SymbolService {
      * @param foundSymbol found symbol
      * @return hover content for specific symbol
      */
-    private Collection<HoverContent> getHoverContents(JCTree.JCCompilationUnit tree,
-                                                      JCTree foundTree,
-                                                      Symbol foundSymbol) {
-        Collection<HoverContent> contents = new LinkedList<>();
+    private Hover getHover(JCTree.JCCompilationUnit tree,
+                           JCTree foundTree,
+                           Symbol foundSymbol) {
+        Hover ret = new Hover();
 
         String text = tree.docComments.getCommentText(foundTree);
         if (text != null) {
-            contents.add(new HoverContent(text));
-        } else {
-
-            switch (foundSymbol.getKind()) {
-                case PACKAGE:
-                    contents.add(new HoverContent("package " + foundSymbol.getQualifiedName()));
-
-                    break;
-                case ENUM:
-                    contents.add(new HoverContent("enum " + foundSymbol.getQualifiedName()));
-
-                    break;
-                case CLASS:
-                    contents.add(new HoverContent("class " + foundSymbol.getQualifiedName()));
-
-                    break;
-                case ANNOTATION_TYPE:
-                    contents.add(new HoverContent("@interface " + foundSymbol.getQualifiedName()));
-
-                    break;
-                case INTERFACE:
-                    contents.add(new HoverContent("interface " + foundSymbol.getQualifiedName()));
-
-                    break;
-                case METHOD:
-                case CONSTRUCTOR:
-                case STATIC_INIT:
-                case INSTANCE_INIT:
-                    Symbol.MethodSymbol method = (Symbol.MethodSymbol) foundSymbol;
-                    String signature = ShortTypePrinter.methodSignature(method);
-                    String returnType = ShortTypePrinter.print(method.getReturnType());
-
-                    contents.add(new HoverContent(returnType + " " + signature));
-
-                    break;
-                case PARAMETER:
-                case LOCAL_VARIABLE:
-                case EXCEPTION_PARAMETER:
-                case ENUM_CONSTANT:
-                case FIELD:
-                    contents.add(new HoverContent(ShortTypePrinter.print(foundSymbol.type)));
-
-                    break;
-                case TYPE_PARAMETER:
-                case OTHER:
-                case RESOURCE_VARIABLE:
-                    break;
-            }
+            ret.setDocHtml(text);
         }
-        return contents;
+
+        switch (foundSymbol.getKind()) {
+            case PACKAGE:
+                ret.setTitle("package " + foundSymbol.getQualifiedName());
+
+                break;
+            case ENUM:
+                ret.setTitle("enum " + foundSymbol.getQualifiedName());
+
+                break;
+            case CLASS:
+                ret.setTitle("class " + foundSymbol.getQualifiedName());
+
+                break;
+            case ANNOTATION_TYPE:
+                ret.setTitle("@interface " + foundSymbol.getQualifiedName());
+
+                break;
+            case INTERFACE:
+                ret.setTitle("interface " + foundSymbol.getQualifiedName());
+
+                break;
+            case METHOD:
+            case CONSTRUCTOR:
+            case STATIC_INIT:
+            case INSTANCE_INIT:
+                Symbol.MethodSymbol method = (Symbol.MethodSymbol) foundSymbol;
+                String signature = ShortTypePrinter.methodSignature(method);
+                String returnType = ShortTypePrinter.print(method.getReturnType());
+
+                ret.setTitle(returnType + " " + signature);
+
+                break;
+            case PARAMETER:
+            case LOCAL_VARIABLE:
+            case EXCEPTION_PARAMETER:
+            case ENUM_CONSTANT:
+            case FIELD:
+                ret.setTitle(ShortTypePrinter.print(foundSymbol.type));
+
+                break;
+            case TYPE_PARAMETER:
+            case OTHER:
+            case RESOURCE_VARIABLE:
+                break;
+        }
+
+        return ret;
     }
 
 

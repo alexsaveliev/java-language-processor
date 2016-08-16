@@ -37,7 +37,8 @@ public class SymbolIndex {
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolIndex.class);
 
     private static class SourceFileIndex {
-        private final EnumMap<ElementKind, Map<String, Range>> declarations = new EnumMap<>(ElementKind.class);
+        private final EnumMap<ElementKind, Map<String, com.sourcegraph.langp.model.Symbol>> declarations =
+                new EnumMap<>(ElementKind.class);
         private final EnumMap<ElementKind, Map<String, Set<Range>>> references = new EnumMap<>(ElementKind.class);
     }
 
@@ -134,15 +135,11 @@ public class SymbolIndex {
     /**
      * @return all local definitions
      */
-    public Collection<DefSpec> definitions() {
-        Collection<DefSpec> ret = new LinkedList<>();
+    public Collection<com.sourcegraph.langp.model.Symbol> definitions() {
+        Collection<com.sourcegraph.langp.model.Symbol> ret = new LinkedList<>();
         for (SourceFileIndex index : sourcePath.values()) {
-            for (Map<String, ?> withKind : index.declarations.values()) {
-                for (String path : withKind.keySet()) {
-                    DefSpec spec = new DefSpec();
-                    spec.setPath(path);
-                    ret.add(spec);
-                }
+            for (Map<String, com.sourcegraph.langp.model.Symbol> withKind : index.declarations.values()) {
+                ret.addAll(withKind.values());
             }
         }
         return ret;
@@ -157,10 +154,11 @@ public class SymbolIndex {
         String key = uniqueName(symbol);
 
         for (SourceFileIndex f : sourcePath.values()) {
-            Map<String, Range> withKind = f.declarations.getOrDefault(kind, Collections.emptyMap());
-            Range range = withKind.get(key);
+            Map<String, com.sourcegraph.langp.model.Symbol> withKind = f.declarations.getOrDefault(kind,
+                    Collections.emptyMap());
+            com.sourcegraph.langp.model.Symbol range = withKind.get(key);
             if (range != null) {
-                return range;
+                return range.getRange();
             }
         }
 
@@ -190,10 +188,12 @@ public class SymbolIndex {
 
         private SourceFileIndex index;
 
+        private JCTree.JCCompilationUnit tree;
+
         @Override
         public void visitTopLevel(JCTree.JCCompilationUnit tree) {
             URI uri = tree.getSourceFile().toUri();
-
+            this.tree = tree;
             index = new SourceFileIndex();
             sourcePath.put(uri, index);
             super.visitTopLevel(tree);
@@ -257,9 +257,17 @@ public class SymbolIndex {
             if (symbol != null && shouldIndex(symbol)) {
                 String key = uniqueName(symbol);
                 Range range = range(tree, compilationUnit);
-                Map<String, Range> withKind = index.declarations.computeIfAbsent(symbol.getKind(),
+                Map<String, com.sourcegraph.langp.model.Symbol> withKind = index.declarations.computeIfAbsent(
+                        symbol.getKind(),
                         newKind -> new HashMap<>());
-                withKind.put(key, range);
+                com.sourcegraph.langp.model.Symbol s = new com.sourcegraph.langp.model.Symbol();
+                s.setRange(range);
+                s.setName(symbol.getQualifiedName().toString());
+                s.setPath(key);
+                s.setKind(symbol.getKind().name().toLowerCase());
+                s.setDocHtml(this.tree.docComments.getCommentText(tree));
+                s.setFile(root.toUri().relativize(this.tree.getSourceFile().toUri()).toString());
+                withKind.put(key, s);
             }
         }
 

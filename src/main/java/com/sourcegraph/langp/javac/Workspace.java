@@ -3,6 +3,7 @@ package com.sourcegraph.langp.javac;
 import com.sourcegraph.langp.config.builder.ScanUtil;
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
+import com.sourcegraph.langp.model.Symbol;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,8 +95,8 @@ public class Workspace {
     /**
      * @return all the exported symbols
      */
-    public Collection<DefSpec> getExportedSymbols() {
-        Collection<DefSpec> ret = new LinkedList<>();
+    public Collection<Symbol> getExportedSymbols() {
+        Collection<Symbol> ret = new LinkedList<>();
         for (Future<SymbolIndex> futureIndex : indexCache.values()) {
             try {
                 SymbolIndex index = futureIndex.get();

@@ -91,17 +91,15 @@ public class SymbolServiceTest {
                 position.getCommit()).toPath(),
                 position);
         assertNotNull(hover);
-        assertEquals("wrong number of content", 1, hover.getContents().size());
-        HoverContent content = hover.getContents().iterator().next();
-        assertEquals("unexpected hover content type",
-                "java",
-                content.getType());
-        assertEquals("unexpected hover content value",
+        assertEquals("unexpected hover doc value",
                 " FooClass is a class.\n" +
                         " \n" +
                         " @author Fred\n" +
                         " \n",
-                StringUtils.remove(content.getValue(), '\r'));
+                StringUtils.remove(hover.getDocHtml(), '\r'));
+        assertEquals("unexpected hover title",
+                "class mypkg.FooClass",
+                StringUtils.remove(hover.getTitle(), '\r'));
     }
 
     @Test

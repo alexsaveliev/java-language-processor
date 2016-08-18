@@ -3,7 +3,11 @@ package com.sourcegraph.langp.javac;
 import com.sourcegraph.langp.config.builder.ScanUtil;
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
+import com.sourcegraph.langp.model.Position;
 import com.sourcegraph.langp.model.Symbol;
+import com.sourcegraph.langp.service.NoDefinitionFoundException;
+import com.sourcegraph.langp.service.SymbolException;
+import com.sourcegraph.langp.service.WorkspaceBeingPreparedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -136,4 +140,28 @@ public class Workspace {
             total--;
         }
     }
+
+    /**
+     * @return position of symbol defined by the given spec
+     */
+    public Position defSpecToPosition(DefSpec defSpec)
+            throws WorkspaceBeingPreparedException, SymbolException, NoDefinitionFoundException {
+        for (Future<SymbolIndex> futureIndex : indexCache.values()) {
+            if (!futureIndex.isDone()) {
+                throw new WorkspaceBeingPreparedException();
+            }
+            try {
+                SymbolIndex index = futureIndex.get();
+                Position pos = index.defSpecToPosition(defSpec);
+                if (pos != null) {
+                    return pos;
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.error("An error occurred while computing index", e);
+                throw new SymbolException("Failed to compute index");
+            }
+        }
+        throw new NoDefinitionFoundException();
+    }
+
 }

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Collection;
 
-public class LocalRefs {
+public class RefLocations {
 
     @JsonProperty(value="Refs")
     private Collection<Range> refs;

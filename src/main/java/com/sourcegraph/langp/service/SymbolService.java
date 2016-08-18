@@ -93,7 +93,7 @@ public class SymbolService {
         } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for hover {}/{} {}:{}",
+            LOGGER.error("An error occurred while looking for hover {}/{} {}:{}",
                     root,
                     position.getFile(),
                     position.getLine(),
@@ -143,18 +143,18 @@ public class SymbolService {
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
-                Range range = index.findSymbol(visitor.found.get());
-                if (range == null) {
+                com.sourcegraph.langp.model.Symbol symbol = index.findSymbol(visitor.found.get());
+                if (symbol == null) {
                     throw new NoDefinitionFoundException();
                 }
-                return range;
+                return symbol.getRange();
             } else {
                 throw new NoDefinitionFoundException();
             }
         } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for definition {}/{} {}:{}",
+            LOGGER.error("An error occurred while looking for definition {}/{} {}:{}",
                     root,
                     position.getFile(),
                     position.getLine(),
@@ -171,7 +171,7 @@ public class SymbolService {
      * @throws SymbolException            if no foundSymbol is found
      * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
-    public LocalRefs localRefs(Position position) throws
+    public RefLocations localRefs(Position position) throws
             WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -200,7 +200,7 @@ public class SymbolService {
             throw new SymbolException("File does not exist");
         }
 
-        LocalRefs ret = new LocalRefs();
+        RefLocations ret = new RefLocations();
         ret.setRefs(new LinkedList<>());
         try {
             workspace.computeIndexes();
@@ -217,11 +217,11 @@ public class SymbolService {
             tree.accept(visitor);
 
             if (visitor.found.isPresent()) {
-                Range range = index.findSymbol(visitor.found.get());
-                if (range == null) {
+                com.sourcegraph.langp.model.Symbol symbol = index.findSymbol(visitor.found.get());
+                if (symbol == null) {
                     throw new NoDefinitionFoundException();
                 }
-                ret.getRefs().add(range);
+                ret.getRefs().add(symbol.getRange());
                 index.references(visitor.found.get()).forEach(ret.getRefs()::add);
                 return ret;
             } else {
@@ -230,7 +230,7 @@ public class SymbolService {
         } catch (NoDefinitionFoundException | SymbolException | WorkspaceException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for local refs {}:{}/{} {}:{}",
+            LOGGER.error("An error occurred while looking for local refs {}:{}/{} {}:{}",
                     position.getRepo(),
                     position.getCommit(),
                     position.getFile(),
@@ -269,7 +269,7 @@ public class SymbolService {
             ret.setDefs(workspace.getExternalDefs());
             return ret;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for external refs {}:{}",
+            LOGGER.error("An error occurred while looking for external refs {}:{}",
                     repoRev.getRepo(),
                     repoRev.getCommit(),
                     e);
@@ -305,7 +305,7 @@ public class SymbolService {
             ret.setSymbols(workspace.getExportedSymbols());
             return ret;
         } catch (Exception e) {
-            LOGGER.info("An error occurred while looking for exported symbols {}:{}",
+            LOGGER.error("An error occurred while looking for exported symbols {}:{}",
                     repoRev.getRepo(),
                     repoRev.getCommit(),
                     e);
@@ -313,6 +313,98 @@ public class SymbolService {
         }
     }
 
+    /**
+     * @param root    workspace root
+     * @param defSpec def spec
+     * @return position of symbol denoted by a given spec
+     * @throws SymbolException            if no symbol is found
+     * @throws NoDefinitionFoundException if there is no symbol with specified spec found
+     */
+    public Position defSpecToPosition(Path root,
+                                      DefSpec defSpec) throws SymbolException,
+            NoDefinitionFoundException,
+            WorkspaceBeingPreparedException {
+
+        LOGGER.info("Defspec to position {}:{}",
+                root,
+                defSpec.getPath());
+
+        Workspace workspace = workspaceService.getWorkspace(root);
+
+        try {
+            return workspace.defSpecToPosition(defSpec);
+        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error("An error occurred while looking for defspec to path {}:{}",
+                    root,
+                    defSpec.getPath(),
+                    e);
+            throw new SymbolException(e.getMessage());
+        }
+    }
+
+    /**
+     * @param root workspace root
+     * @param position  symbols' position
+     * @return def spec of symbol at the given position
+     * @throws SymbolException            if no symbol is found
+     * @throws NoDefinitionFoundException if there is no symbol at the given position
+     */
+    public DefSpec positionToDefSpec(Path root,
+                                     Position position) throws SymbolException,
+            NoDefinitionFoundException,
+            WorkspaceBeingPreparedException {
+
+        LOGGER.info("Position to def spec {}:{}/{} {}:{}",
+                position.getRepo(),
+                position.getCommit(),
+                position.getFile(),
+                position.getLine(),
+                position.getCharacter());
+
+        Workspace workspace = workspaceService.getWorkspace(root);
+
+        Path sourceFile = root.resolve(position.getFile());
+        if (!sourceFile.startsWith(root)) {
+            throw new SymbolException("File is outside of workspace");
+        }
+        if (!sourceFile.toFile().isFile()) {
+            throw new SymbolException("File does not exist");
+        }
+
+        try {
+
+            SymbolIndex index = getIndex(workspace, sourceFile);
+            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
+            if (tree == null) {
+                throw new SymbolException("File does not exist");
+            }
+            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
+            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
+            tree.accept(visitor);
+
+            if (visitor.found.isPresent()) {
+                com.sourcegraph.langp.model.Symbol symbol = index.findSymbol(visitor.found.get());
+                if (symbol == null) {
+                    throw new NoDefinitionFoundException();
+                }
+                return symbol;
+            } else {
+                throw new NoDefinitionFoundException();
+            }
+        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error("An error occurred while looking for position to def spec {}:{}/{} {}:{}",
+                    position.getRepo(),
+                    position.getCommit(),
+                    position.getFile(),
+                    position.getLine(),
+                    position.getCharacter(), e);
+            throw new SymbolException(e.getMessage());
+        }
+    }
 
     /**
      * @param file            source file

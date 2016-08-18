@@ -160,7 +160,7 @@ public class SymbolServiceTest {
         position.setFile("src/main/java/mypkg/FooClass.java");
         position.setLine(14);
         position.setCharacter(19);
-        LocalRefs refs = symbolService.localRefs(position);
+        RefLocations refs = symbolService.localRefs(position);
         assertNotNull(refs);
         Collection<Range> expected = new ObjectMapper().
                 readValue(this.getClass().getResourceAsStream("/data/local-refs.json"),

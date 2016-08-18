@@ -2,6 +2,7 @@ package com.sourcegraph.langp.javac;
 
 import com.sourcegraph.langp.model.DefSpec;
 import com.sourcegraph.langp.model.JavacConfig;
+import com.sourcegraph.langp.model.Position;
 import com.sourcegraph.langp.model.Range;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.Trees;
@@ -147,18 +148,18 @@ public class SymbolIndex {
 
     /**
      * @param symbol symbol to search for
-     * @return symbol's location
+     * @return symbol's information
      */
-    public Range findSymbol(Symbol symbol) {
+    public com.sourcegraph.langp.model.Symbol findSymbol(Symbol symbol) {
         ElementKind kind = symbol.getKind();
         String key = uniqueName(symbol);
 
         for (SourceFileIndex f : sourcePath.values()) {
             Map<String, com.sourcegraph.langp.model.Symbol> withKind = f.declarations.getOrDefault(kind,
                     Collections.emptyMap());
-            com.sourcegraph.langp.model.Symbol range = withKind.get(key);
-            if (range != null) {
-                return range.getRange();
+            com.sourcegraph.langp.model.Symbol sym = withKind.get(key);
+            if (sym != null) {
+                return sym;
             }
         }
 
@@ -174,7 +175,16 @@ public class SymbolIndex {
             }
             JCTree symbolTree = TreeInfo.declarationFor(symbol, compilationUnit);
             if (symbolTree != null) {
-                return range(symbolTree, compilationUnit);
+                Range range = range(symbolTree, compilationUnit);
+                com.sourcegraph.langp.model.Symbol s = new com.sourcegraph.langp.model.Symbol();
+                s.setRange(range);
+                s.setName(symbol.getQualifiedName().toString());
+                s.setPath(key);
+                s.setKind(symbol.getKind().name().toLowerCase());
+                s.setDocHtml(compilationUnit.docComments.getCommentText(symbolTree));
+                s.setFile(root.toUri().relativize(compilationUnit.getSourceFile().toUri()).toString());
+                return s;
+
             }
         }
 
@@ -606,6 +616,27 @@ public class SymbolIndex {
      */
     public Future<SymbolIndex> index() {
         return this.executorService.submit(new IndexBuilder(root, config));
+    }
+
+    /**
+     * @param defSpec
+     * @return position of symbol defined by a given path if found
+     */
+    Position defSpecToPosition(DefSpec defSpec) {
+        for (SourceFileIndex index : sourcePath.values()) {
+            for (Map<String, com.sourcegraph.langp.model.Symbol> withKind : index.declarations.values()) {
+                for (com.sourcegraph.langp.model.Symbol symbol : withKind.values()) {
+                    if (symbol.getPath().equals(defSpec.getPath())) {
+                        Position ret = new Position();
+                        ret.setFile(symbol.getFile());
+                        ret.setLine(symbol.getRange().getStartLine());
+                        ret.setCharacter(symbol.getRange().getStartCharacter());
+                        return ret;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
 }

@@ -55,7 +55,7 @@ public class LanguageProcessorController {
     }
 
     @PostMapping(value = "/local-refs")
-    public LocalRefs localRefs(@Valid @RequestBody Position pos)
+    public RefLocations localRefs(@Valid @RequestBody Position pos)
             throws WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
@@ -72,6 +72,37 @@ public class LanguageProcessorController {
     public ExportedSymbols exportedSymbols(@Valid @RequestBody RepoRev repoRev)
             throws WorkspaceException, SymbolException {
         return symbolService.exportedSymbols(repoRev);
+    }
+
+    @PostMapping(value = "/defspec-to-position")
+    public Position defSpecToPosition(@Valid @RequestBody DefSpec defSpec)
+            throws WorkspaceBeingPreparedException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
+        Path root = repositoryService.getWorkspace(defSpec.getRepo(), defSpec.getCommit()).toPath();
+        return symbolService.defSpecToPosition(root, defSpec);
+    }
+
+    @PostMapping(value = "/position-to-defspec")
+    public DefSpec positionToDefSpec(@Valid @RequestBody Position pos)
+            throws WorkspaceBeingPreparedException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
+        Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
+        return symbolService.positionToDefSpec(root, pos);
+    }
+
+    @PostMapping(value = "/defspec-refs")
+    public RefLocations defSpecRefs(@Valid @RequestBody DefSpec defSpec)
+            throws WorkspaceBeingPreparedException,
+            WorkspaceException,
+            SymbolException,
+            NoDefinitionFoundException {
+        Path root = repositoryService.getWorkspace(defSpec.getRepo(), defSpec.getCommit()).toPath();
+        Position pos = symbolService.defSpecToPosition(root, defSpec);
+        return localRefs(pos);
     }
 
     @ExceptionHandler({WorkspaceBeingPreparedException.class})

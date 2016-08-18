@@ -14,6 +14,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutionException;
 
 @RestController
 //@SuppressWarnings("unused")
@@ -29,12 +30,8 @@ public class LanguageProcessorController {
 
     @PostMapping(value = "/prepare")
     public void prepare(@Valid @RequestBody RepoRev repoRev, HttpServletResponse response)
-            throws WorkspaceBeingPreparedException,
-            WorkspaceException,
-            SymbolException,
-            NoDefinitionFoundException {
-        repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit(), true);
-        response.setStatus(HttpServletResponse.SC_ACCEPTED);
+            throws WorkspaceException, InterruptedException, ExecutionException {
+        repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit(), true).get();
     }
 
     @PostMapping(value = "/definition")

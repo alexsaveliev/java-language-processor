@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.io.File;
+import java.nio.file.Paths;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -45,12 +46,6 @@ public class RepositoryService {
     @Value("${workspace.get.timeout:250}")
     private long timeout;
 
-
-    /**
-     * Root directory where all repositories are located
-     */
-    private File root;
-
     /**
      * Tracks all completed and pending jobs to clone and configure repository
      */
@@ -74,7 +69,7 @@ public class RepositoryService {
      */
     @Async
     public Future<File> getRepository(String repo, String commit, boolean update) {
-        File workspace = new File(new File(root, repo), commit);
+        File workspace = Paths.get(this.workspace, repo, commit, "workspace").toFile();
         Future<File> current = !update ? jobs.get(workspace) : null;
         if (current != null) {
             return current;
@@ -90,7 +85,7 @@ public class RepositoryService {
      */
     @PostConstruct
     private void init() {
-        this.root = new File(workspace);
+        File root = new File(workspace);
         if (!root.exists()) {
             if (!root.mkdirs()) {
                 throw new RuntimeException("Unable to create workspace directory " + workspace);
@@ -112,7 +107,7 @@ public class RepositoryService {
             future.get();
         }
         jobs.clear();
-        FileUtils.cleanDirectory(root);
+        FileUtils.cleanDirectory(new File(workspace));
         configurationService.purge();
     }
 
@@ -137,7 +132,6 @@ public class RepositoryService {
             throw new WorkspaceBeingPreparedException();
         }
     }
-
 
 
     /**
@@ -208,7 +202,8 @@ public class RepositoryService {
 
         /**
          * Clones repository
-         * @param uri clone URL
+         *
+         * @param uri         clone URL
          * @param destination destination directory
          * @return operation status
          */
@@ -226,8 +221,9 @@ public class RepositoryService {
 
         /**
          * Resets local copy to specific revision
+         *
          * @param repoDir local repo directory
-         * @param commit revision to reset to
+         * @param commit  revision to reset to
          * @return operation status
          */
         private boolean reset(File repoDir, String commit) {

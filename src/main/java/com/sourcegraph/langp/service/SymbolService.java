@@ -14,6 +14,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -29,6 +30,9 @@ import java.util.concurrent.TimeoutException;
 public class SymbolService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolService.class);
+
+    private static final String UNIT_TYPE = "JavaArtifact";
+    private static final String UNIT = "Unit";
 
     /**
      * Wait no more than X milliseconds to acquire object
@@ -302,7 +306,15 @@ public class SymbolService {
             Workspace workspace = workspaceService.getWorkspace(root);
             workspace.computeIndexes();
             ExportedSymbols ret = new ExportedSymbols();
-            ret.setSymbols(workspace.getExportedSymbols());
+            Collection<com.sourcegraph.langp.model.Symbol> symbols = new LinkedList<>();
+            for (com.sourcegraph.langp.model.Symbol symbol : workspace.getExportedSymbols()) {
+                symbol.setRepo(repoRev.getRepo());
+                symbol.setCommit(repoRev.getCommit());
+                symbol.setUnit(UNIT);
+                symbol.setUnitType(UNIT_TYPE);
+                symbols.add(symbol);
+            }
+            ret.setSymbols(symbols);
             return ret;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for exported symbols {}:{}",
@@ -389,6 +401,10 @@ public class SymbolService {
                 if (symbol == null) {
                     throw new NoDefinitionFoundException();
                 }
+                symbol.setRepo(position.getRepo());
+                symbol.setCommit(position.getCommit());
+                symbol.setUnit(UNIT);
+                symbol.setUnitType(UNIT_TYPE);
                 return symbol;
             } else {
                 throw new NoDefinitionFoundException();

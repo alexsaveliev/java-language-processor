@@ -31,7 +31,10 @@ public class LanguageProcessorController {
     @PostMapping(value = "/prepare")
     public void prepare(@Valid @RequestBody RepoRev repoRev, HttpServletResponse response)
             throws WorkspaceException, InterruptedException, ExecutionException {
-        repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit());
+        LOGGER.info("Prepare {}@{}",
+                repoRev.getRepo(),
+                repoRev.getCommit());
+        repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit(), true);
     }
 
     @PostMapping(value = "/definition")

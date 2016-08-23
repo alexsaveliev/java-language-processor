@@ -24,8 +24,6 @@ public class GradleBuilder {
     private static final String GRADLE_CMD_WINDOWS = "gradle.bat";
     private static final String GRADLE_CMD_OTHER = "gradle";
 
-    private static final String DEFAULT_GROUP_ID = "default-group";
-
     public static boolean prepare(Path path) {
         LOGGER.info("Scanning for Gradle project descriptors in {}", path);
         Collection<Path> descriptors = getDescriptors(path);
@@ -55,7 +53,9 @@ public class GradleBuilder {
                     }
                 }
                 JavacConfig configuration = new JavacConfig();
+                configuration.unit = UnitUtil.id(project.groupId, project.artifactId);
                 configuration.sources = new LinkedHashSet<>();
+                configuration.files = new LinkedHashSet<>();
                 configuration.classPath = new LinkedHashSet<>();
                 configuration.outputDirectory = project.outputDir;
                 configuration.dependencies = project.dependencies;
@@ -81,6 +81,7 @@ public class GradleBuilder {
                             configuration.sources.add(item);
                         }
                     }
+                    configuration.files.addAll(project.files);
                 }
                 Project p = projectsCache.get(entry.getKey());
                 configuration.save(path, Paths.get(p.projectDir));
@@ -102,7 +103,7 @@ public class GradleBuilder {
         Collection<Project> projects = collectMetaInformation(root, descriptor);
         Map<String, Project> ret = new HashMap<>();
         for (Project project : projects) {
-            ret.put(project.groupId + '/' + project.artifactId, project);
+            ret.put(UnitUtil.id(project.groupId, project.artifactId), project);
             visited.add(Paths.get(project.descriptor).toAbsolutePath().normalize());
         }
         return ret;
@@ -176,7 +177,7 @@ public class GradleBuilder {
                                 if (project == null) {
                                     continue;
                                 }
-                                project.groupId = groupId(payload);
+                                project.groupId = UnitUtil.groupId(payload);
                                 break;
                             case "SRCLIB-CLASSPATH":
                                 if (project == null) {
@@ -193,7 +194,7 @@ public class GradleBuilder {
                                     continue;
                                 }
                                 String tokens[] = payload.split(":", 3);
-                                String unitName = groupId(tokens[0]) + '/' + tokens[1];
+                                String unitName = UnitUtil.id(tokens[0], tokens[1]);
                                 project.sourceDirs.add(new SourcePathElement(unitName, tokens[2]));
                                 break;
                             case "SRCLIB-PROJECTDIR":
@@ -207,7 +208,7 @@ public class GradleBuilder {
                                     continue;
                                 }
                                 String depTokens[] = payload.split(":", 3);
-                                project.projectDependencies.add(new ProjectDependency(groupId(depTokens[0]),
+                                project.projectDependencies.add(new ProjectDependency(UnitUtil.groupId(depTokens[0]),
                                         depTokens[1],
                                         depTokens[2]));
                                 break;
@@ -217,7 +218,7 @@ public class GradleBuilder {
                                 }
                                 String[] parts = payload.split(":", 5);
                                 project.dependencies.add(new Dependency(
-                                        groupId(parts[1]), // GroupID
+                                        UnitUtil.groupId(parts[1]), // GroupID
                                         parts[2], // ArtifactID
                                         parts[3], // Version
                                         parts.length > 4 ? parts[4] : null // file
@@ -243,6 +244,12 @@ public class GradleBuilder {
                                     continue;
                                 }
                                 project.android = true;
+                                break;
+                            case "SRCLIB-FILE":
+                                if (project == null) {
+                                    continue;
+                                }
+                                project.files.add(payload);
                                 break;
                             default:
                                 LOGGER.debug("gradle: {}", line);
@@ -342,14 +349,6 @@ public class GradleBuilder {
     }
 
     /**
-     * @param groupId group ID (may be empty)
-     * @return normalize group ID (not empty)
-     */
-    private static String groupId(String groupId) {
-        return StringUtils.defaultIfEmpty(groupId, DEFAULT_GROUP_ID);
-    }
-
-    /**
      * Assembles arguments for Gradle wrapper
      *
      * @param wrapper Gradle wrapper (may be null - use default one)
@@ -419,7 +418,7 @@ public class GradleBuilder {
         infos.add(project);
 
         for (ProjectDependency projectDependency : project.projectDependencies) {
-            String depId = projectDependency.groupId + '/' + projectDependency.artifactId;
+            String depId = UnitUtil.id(projectDependency.groupId, projectDependency.artifactId);
             if (!visited.contains(depId)) {
                 collectProjects(depId, infos, cache, visited);
             }
@@ -428,7 +427,7 @@ public class GradleBuilder {
         // in order to resolve it, we'll check if there is an source unit with the same name
         // as declared in external dependency and use unit's sourcepath if found
         for (Dependency raw : project.dependencies) {
-            String depId = raw.groupID + '/' + raw.artifactID;
+            String depId = UnitUtil.id(raw.groupID, raw.artifactID);
             project = cache.get(depId);
             if (project != null) {
                 if (!visited.contains(id)) {
@@ -446,12 +445,13 @@ public class GradleBuilder {
         Collection<ProjectDependency> projectDependencies = new LinkedList<>();
         Collection<Dependency> dependencies = new LinkedList<>();
         Collection<SourcePathElement> sourceDirs = new LinkedList<>();
+        Collection<String> files = new LinkedList<>();
         String outputDir;
         String descriptor;
         boolean android;
 
         String id() {
-            return groupId + '/' + artifactId;
+            return UnitUtil.id(groupId, artifactId);
         }
     }
 

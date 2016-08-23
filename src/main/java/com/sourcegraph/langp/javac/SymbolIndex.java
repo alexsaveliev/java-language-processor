@@ -22,11 +22,7 @@ import javax.tools.StandardJavaFileManager;
 import java.io.IOException;
 import java.io.Reader;
 import java.net.URI;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -36,6 +32,8 @@ import java.util.concurrent.*;
 public class SymbolIndex {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolIndex.class);
+
+    private static final String UNIT_TYPE = "JavaArtifact";
 
     private static class SourceFileIndex {
         private final EnumMap<ElementKind, Map<String, com.sourcegraph.langp.model.Symbol>> declarations =
@@ -277,6 +275,8 @@ public class SymbolIndex {
                 s.setKind(symbol.getKind().name().toLowerCase());
                 s.setDocHtml(this.tree.docComments.getCommentText(tree));
                 s.setFile(root.toUri().relativize(this.tree.getSourceFile().toUri()).toString());
+                s.setUnitType(UNIT_TYPE);
+                s.setUnit(config.unit);
                 withKind.put(key, s);
             }
         }
@@ -584,24 +584,13 @@ public class SymbolIndex {
                 }
                 total--;
             }
+            LOGGER.info("Built indexes for [{}]", StringUtils.join(config.sources, ' '));
             return SymbolIndex.this;
         }
 
         private Iterable<? extends JavaFileObject> getSourceFiles(StandardJavaFileManager fileManager)
                 throws IOException {
-            Collection<String> sources = new LinkedList<>();
-            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    String name = file.getFileName().toString();
-                    if (name.endsWith(".java")) {
-                        sources.add(file.toAbsolutePath().normalize().toString());
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
-
-            });
-            return fileManager.getJavaFileObjectsFromStrings(sources);
+            return fileManager.getJavaFileObjectsFromStrings(config.files);
         }
     }
 

@@ -23,28 +23,29 @@ public class JavacConfig {
         mapper = new ObjectMapper();
     }
 
+    public Collection<String> files;
     public Collection<String> sources;
     public Collection<String> classPath;
     public String outputDirectory;
     public boolean android;
     public boolean androidSdk;
     public Collection<Dependency> dependencies;
+    public String unit;
 
     private Path file;
 
-    /**
-     * @param path to check
-     * @return true if sources contain given path
-     */
-    public boolean containsSource(Path path) {
-        return sources != null && sources.stream().anyMatch(path::startsWith);
-    }
     /**
      * Normalizes and saves configuration
      * @param workspaceRoot workspace root, all entries will be resolved against it
      * @param targetDir target directory to create configuration in
      */
     public void save(Path workspaceRoot, Path targetDir) {
+        if (files != null) {
+            files = files.
+                    stream().
+                    map(s -> workspaceRoot.resolve(s).toAbsolutePath().normalize().toString()).
+                    collect(Collectors.toList());
+        }
         if (sources != null) {
             sources = sources.
                     stream().

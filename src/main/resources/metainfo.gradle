@@ -2,6 +2,13 @@ def isConfigSupported(conf) {
     return (conf.name == "compile" || conf.name == "testCompile" || conf.name == "provided" || conf.name == "compileOnly");
 }
 
+def listSourceFiles(task) {
+
+    task.source.each { File file ->
+        println "SRCLIB-SOURCEFILE $file.absolutePath"
+    }
+}
+
 def listSourceDirs(task, sourceSets, sourceSetName) {
     try {
         Object ss = sourceSets.getByName(sourceSetName);
@@ -162,6 +169,8 @@ allprojects {
 
             try {
                 project.plugins.withType(JavaPlugin) {
+                    listSourceFiles(compileJava)
+                    listSourceFiles(compileTestJava)
                     if (project.hasProperty("sourceSets")) {
                         listSourceDirs(task, project.sourceSets, "main")
                         listSourceDirs(task, project.sourceSets, "test")
@@ -248,21 +257,27 @@ allprojects {
                 }
 
                 if (project.tasks.hasProperty("compileDebugJava")) {
+                    listSourceFiles(project.tasks.compileDebugJava)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugJava.classpath.asPath"
                 }
                 if (project.tasks.hasProperty("compileDebugUnitTestJava")) {
+                    listSourceFiles(project.tasks.compileDebugUnitTestJava)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugUnitTestJava.classpath.asPath"
                 }
                 if (project.tasks.hasProperty("compileDebugJavaWithJavac")) {
+                    listSourceFiles(project.tasks.compileDebugJavaWithJavac)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugJavaWithJavac.classpath.asPath"
                 }
                 if (project.tasks.hasProperty("compileDebugUnitTestJavaWithJavac")) {
+                    listSourceFiles(project.tasks.compileDebugUnitTestJavaWithJavac)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugUnitTestJavaWithJavac.classpath.asPath"
                 }
                 if (project.tasks.hasProperty("compileDebugAndroidTestJava")) {
+                    listSourceFiles(project.tasks.compileDebugAndroidTestJava)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugAndroidTestJava.classpath.asPath"
                 }
                 if (project.tasks.hasProperty("compileDebugAndroidTestJavaWithJavac")) {
+                    listSourceFiles(project.tasks.compileDebugAndroidTestJavaWithJavac)
                     println "SRCLIB-CLASSPATH $project.tasks.compileDebugAndroidTestJavaWithJavac.classpath.asPath"
                 }
             }

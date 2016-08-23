@@ -1,18 +1,21 @@
 package com.sourcegraph.langp.config.builder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Set;
 
 /**
  * File scan utilities
  */
 public class ScanUtil {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ScanUtil.class);
 
     private ScanUtil() {
     }
@@ -54,5 +57,33 @@ public class ScanUtil {
         });
 
         return result;
+    }
+
+    /**
+     * @param path workspace root
+     * @param directories source directories
+     * @return all Java files found
+     */
+    static Set<String> getSourceFiles(Path path, Collection<String> directories) {
+        Set<String> files = new HashSet<>();
+        try {
+            FileVisitor<Path> visitor = new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                        throws IOException {
+                    String name = file.toString();
+                    if (name.endsWith(".java")) {
+                        files.add(name);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            };
+            for (String directory : directories) {
+                Files.walkFileTree(path.resolve(directory), visitor);
+            }
+        } catch (IOException e) {
+            LOGGER.warn("Unable to collect java files", e);
+        }
+        return files;
     }
 }

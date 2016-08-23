@@ -5,19 +5,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.Set;
+import java.util.*;
 
 public class DefaultBuilder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultBuilder.class);
+
+    // Default unit identifier
+    private static final String DEFAULT_UNIT = ".";
 
     public static boolean prepare(Path path) {
         LOGGER.info("Scanning for Java sources in {}", path);
@@ -28,7 +25,9 @@ public class DefaultBuilder {
             directories.add(path.toAbsolutePath().normalize().toString());
         }
         JavacConfig configuration = new JavacConfig();
+        configuration.unit = DEFAULT_UNIT;
         configuration.classPath = new LinkedList<>();
+        configuration.files = ScanUtil.getSourceFiles(path, directories);
         configuration.sources = directories;
         configuration.dependencies = Collections.emptyList();
         configuration.save(path, path);
@@ -58,6 +57,5 @@ public class DefaultBuilder {
         }
         return dirs;
     }
-
 
 }

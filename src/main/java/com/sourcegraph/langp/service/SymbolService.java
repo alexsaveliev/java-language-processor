@@ -31,9 +31,6 @@ public class SymbolService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolService.class);
 
-    private static final String UNIT_TYPE = "JavaArtifact";
-    private static final String UNIT = "Unit";
-
     /**
      * Wait no more than X milliseconds to acquire object
      */
@@ -310,8 +307,6 @@ public class SymbolService {
             for (com.sourcegraph.langp.model.Symbol symbol : workspace.getExportedSymbols()) {
                 symbol.setRepo(repoRev.getRepo());
                 symbol.setCommit(repoRev.getCommit());
-                symbol.setUnit(UNIT);
-                symbol.setUnitType(UNIT_TYPE);
                 symbols.add(symbol);
             }
             ret.setSymbols(symbols);
@@ -403,8 +398,6 @@ public class SymbolService {
                 }
                 symbol.setRepo(position.getRepo());
                 symbol.setCommit(position.getCommit());
-                symbol.setUnit(UNIT);
-                symbol.setUnitType(UNIT_TYPE);
                 return symbol;
             } else {
                 throw new NoDefinitionFoundException();

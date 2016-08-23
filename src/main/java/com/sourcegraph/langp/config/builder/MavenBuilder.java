@@ -118,7 +118,7 @@ public class MavenBuilder {
             LOGGER.info("Parsing {}", descriptor);
             try {
                 MavenProject project = getMavenProject(descriptor);
-                idToProjectMap.put(project.getGroupId() + '/' + project.getArtifactId(), project);
+                idToProjectMap.put(UnitUtil.id(project.getGroupId(), project.getArtifactId()), project);
                 pathToProjectMap.put(descriptor.toAbsolutePath().normalize(), project);
                 repositories.addAll(project.getRepositories());
             } catch (ModelBuildingException e) {
@@ -131,7 +131,10 @@ public class MavenBuilder {
             LOGGER.info("Processing {}", entry.getKey());
             MavenProject project = entry.getValue();
             JavacConfig configuration = new JavacConfig();
+            configuration.unit = UnitUtil.id(project.getGroupId(), project.getArtifactId());
             configuration.sources = collectSourcePath(project, idToProjectMap);
+            configuration.files = ScanUtil.getSourceFiles(project.getModel().getPomFile().getParentFile().toPath(),
+                    configuration.sources);
             configuration.outputDirectory = project.getBuild().getOutputDirectory();
             Set<com.sourcegraph.langp.model.Dependency> dependencies = new HashSet<>();
             List<Dependency> mavenDeps = project.getDependencies();
@@ -149,7 +152,7 @@ public class MavenBuilder {
                     pathToProjectMap).
                     stream().
                     filter(dep ->
-                            !idToProjectMap.containsKey(dep.getGroupId() + '/' + dep.getArtifactId())).
+                            !idToProjectMap.containsKey(UnitUtil.id(dep.getGroupId(), dep.getArtifactId()))).
                     collect(Collectors.toList());
             LOGGER.info("Fetching artifacts");
             Collection<Artifact> resolvedArtifacts = resolveDependencyArtifacts(externalDependencies,
@@ -206,14 +209,14 @@ public class MavenBuilder {
                                           Map<String, MavenProject> idToProjectMap,
                                           Collection<String> ret,
                                           Set<String> visited) {
-        String id = project.getGroupId() + '/' + project.getArtifactId();
+        String id = UnitUtil.id(project.getGroupId(), project.getArtifactId());
         if (!visited.add(id)) {
             return;
         }
         // extract project's source roots
         collectSourceRoots(project, ret);
         for (Dependency dependency : project.getDependencies()) {
-            id = dependency.getGroupId() + '/' + dependency.getArtifactId();
+            id = UnitUtil.id(dependency.getGroupId(), dependency.getArtifactId());
             MavenProject dep = idToProjectMap.get(id);
             if (dep != null) {
                 // extract project's local dependency source roots
@@ -350,7 +353,7 @@ public class MavenBuilder {
                                             Map<Path, MavenProject> pathToProjectMap,
                                             Collection<Dependency> ret,
                                             Set<String> visited) {
-        String id = project.getGroupId() + '/' + project.getArtifactId();
+        String id = UnitUtil.id(project.getGroupId(), project.getArtifactId());
         if (!visited.add(id)) {
             return;
         }

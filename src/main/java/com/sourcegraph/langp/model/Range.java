@@ -66,6 +66,14 @@ public class Range extends RepoRev {
         super();
     }
 
+    public Range(Range source) {
+        this(source.getFile(),
+                source.getStartLine(),
+                source.getStartCharacter(),
+                source.getEndLine(),
+                source.getEndCharacter());
+    }
+
     public Range(String file,
                  int startLine,
                  int startCharacter,

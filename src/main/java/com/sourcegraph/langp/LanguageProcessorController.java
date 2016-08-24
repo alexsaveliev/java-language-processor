@@ -14,6 +14,8 @@ import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collection;
+import java.util.LinkedList;
 import java.util.concurrent.ExecutionException;
 
 @RestController
@@ -44,7 +46,10 @@ public class LanguageProcessorController {
             SymbolException,
             NoDefinitionFoundException {
         Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
-        return symbolService.definition(root, pos);
+        Range ret = symbolService.definition(root, pos);
+        ret.setRepo(pos.getRepo());
+        ret.setCommit(pos.getCommit());
+        return ret;
     }
 
     @PostMapping(value = "/hover")
@@ -62,7 +67,16 @@ public class LanguageProcessorController {
             throws WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
-        return symbolService.localRefs(pos);
+        RefLocations ret = symbolService.localRefs(pos);
+        Collection<Range> refs = new LinkedList<>();
+        for (Range range : ret.getRefs()) {
+            Range copy = new Range(range);
+            copy.setRepo(pos.getRepo());
+            copy.setCommit(pos.getCommit());
+            refs.add(copy);
+        }
+        ret.setRefs(refs);
+        return ret;
     }
 
     @PostMapping(value = "/external-refs")

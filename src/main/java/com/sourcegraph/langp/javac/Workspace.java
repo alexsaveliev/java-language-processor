@@ -54,11 +54,11 @@ public class Workspace {
      * @param path source file path
      * @return index associated that includes given path
      */
-    public Future<SymbolIndex> findIndex(Path path) {
+    public Future<SymbolIndex> findIndex(Path path) throws WorkspaceBeingPreparedException {
         Path dir = path.getParent();
         JavacConfig config = findConfig(dir);
         if (config == null) {
-            throw new NoJavaConfigException(path);
+            throw new WorkspaceBeingPreparedException();
         }
         return indexCache.computeIfAbsent(config.getFile(),
                 configFile -> new SymbolIndex(config, root, this, executorService).index());
@@ -116,7 +116,7 @@ public class Workspace {
      * Ensures that all indexes are computed, blocks execution
      * @throws IOException
      */
-    public void computeIndexes() throws IOException {
+    public void computeIndexes() throws IOException, WorkspaceBeingPreparedException {
         Collection<Path> configs = ScanUtil.findMatchingFiles(root, JavacConfig.CONFIG_FILE_NAME);
         BlockingQueue<Future<SymbolIndex>> queue = new LinkedBlockingQueue<>();
         for (Path config : configs) {

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class JavacConfig {
@@ -23,7 +24,7 @@ public class JavacConfig {
         mapper = new ObjectMapper();
     }
 
-    public Collection<String> files;
+    public Set<String> files;
     public Collection<String> sources;
     public Collection<String> classPath;
     public String outputDirectory;
@@ -44,7 +45,7 @@ public class JavacConfig {
             files = files.
                     stream().
                     map(s -> workspaceRoot.resolve(s).toAbsolutePath().normalize().toString()).
-                    collect(Collectors.toList());
+                    collect(Collectors.toSet());
         }
         if (sources != null) {
             sources = sources.

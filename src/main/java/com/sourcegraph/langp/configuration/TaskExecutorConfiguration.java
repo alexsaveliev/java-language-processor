@@ -9,10 +9,10 @@ import java.util.concurrent.*;
 @Configuration
 public class TaskExecutorConfiguration {
 
-    @Value("${tasks.pool.core.size:10}")
+    @Value("${tasks.pool.core.size:50}")
     private int corePoolSize;
 
-    @Value("${tasks.pool.max.size:10}")
+    @Value("${tasks.pool.max.size:100}")
     private int maxPoolSize;
 
     @Bean

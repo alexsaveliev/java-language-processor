@@ -19,6 +19,7 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
+import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
 import java.net.URI;
@@ -49,7 +50,7 @@ public class SymbolIndex {
     /**
      * Active files, for which we index locals
      */
-    private Map<URI, Future<JCTree.JCCompilationUnit>> activeDocuments = new ConcurrentHashMap<>();
+    private Map<String, Future<JCTree.JCCompilationUnit>> activeDocuments = new ConcurrentHashMap<>();
 
     private Path root;
 
@@ -483,8 +484,16 @@ public class SymbolIndex {
         }
     }
 
-    public Future<JCTree.JCCompilationUnit> get(URI sourceFile) {
+    public Future<JCTree.JCCompilationUnit> get(String sourceFile) {
         return activeDocuments.get(sourceFile);
+    }
+
+    /**
+     * @param sourceFile source file to check
+     * @return true if this index contains file (file is indexable)
+     */
+    public boolean contains(String sourceFile) {
+        return config.files.contains(sourceFile);
     }
 
     private static Range findRange(JavaFileObject file, long startOffset, long endOffset) throws IOException {
@@ -567,7 +576,8 @@ public class SymbolIndex {
             for (CompilationUnitTree unit : units) {
                 JCTree.JCCompilationUnit jcCompilationUnit = (JCTree.JCCompilationUnit) unit;
                 total++;
-                activeDocuments.put(unit.getSourceFile().toUri(), completionService.submit(() -> {
+                activeDocuments.put(new File(unit.getSourceFile().getName()).getAbsolutePath(),
+                        completionService.submit(() -> {
                     LOGGER.info("Indexing {}", unit.getSourceFile().getName());
                     jcCompilationUnit.accept(new Indexer());
                     return jcCompilationUnit;

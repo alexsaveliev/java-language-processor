@@ -77,6 +77,9 @@ public class SymbolService {
 
         try {
             SymbolIndex index = getIndex(workspace, sourceFile);
+            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+                throw new NoDefinitionFoundException();
+            }
             JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
             if (tree == null) {
                 throw new SymbolException("File does not exist");
@@ -135,6 +138,9 @@ public class SymbolService {
 
         try {
             SymbolIndex index = getIndex(workspace, sourceFile);
+            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+                throw new NoDefinitionFoundException();
+            }
             JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
             if (tree == null) {
                 throw new SymbolException("File does not exist");
@@ -207,6 +213,10 @@ public class SymbolService {
             workspace.computeIndexes();
 
             SymbolIndex index = getIndex(workspace, sourceFile);
+            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+                throw new NoDefinitionFoundException();
+            }
+
             JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
 
             if (tree == null) {
@@ -383,6 +393,9 @@ public class SymbolService {
         try {
 
             SymbolIndex index = getIndex(workspace, sourceFile);
+            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+                throw new NoDefinitionFoundException();
+            }
             JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
             if (tree == null) {
                 throw new SymbolException("File does not exist");
@@ -491,7 +504,7 @@ public class SymbolService {
      */
     private JCTree.JCCompilationUnit getTree(SymbolIndex index, Path path)
             throws WorkspaceBeingPreparedException, WorkspaceException {
-        Future<JCTree.JCCompilationUnit> future = index.get(path.toUri());
+        Future<JCTree.JCCompilationUnit> future = index.get(path.toFile().getAbsolutePath());
         if (future == null) {
             throw new WorkspaceBeingPreparedException();
         }

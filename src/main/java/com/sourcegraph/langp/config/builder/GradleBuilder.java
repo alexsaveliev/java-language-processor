@@ -245,7 +245,7 @@ public class GradleBuilder {
                                 }
                                 project.android = true;
                                 break;
-                            case "SRCLIB-FILE":
+                            case "SRCLIB-SOURCEFILE":
                                 if (project == null) {
                                     continue;
                                 }

@@ -1,8 +1,8 @@
 package com.sourcegraph.langp;
 
-import com.sourcegraph.langp.model.Error;
-import com.sourcegraph.langp.model.*;
-import com.sourcegraph.langp.service.*;
+import com.sourcegraph.common.model.Error;
+import com.sourcegraph.common.model.*;
+import com.sourcegraph.common.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

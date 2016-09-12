@@ -1,0 +1,82 @@
+package com.sourcegraph.common.javac.index;
+
+import com.sourcegraph.common.model.Symbol;
+import org.apache.commons.dbcp2.BasicDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+
+import javax.sql.DataSource;
+import java.nio.file.Path;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+
+@Component("index")
+public class Index {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Index.class);
+
+    private static final String INSERT_SQL = "INSERT INTO symbols (path, file, start_line, start_character, end_line, end_character, title, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+
+    private Path path;
+
+    @Value("${db.pool.min.idle:1}")
+    private int minIdle;
+
+    @Value("${db.pool.max.idle:10}")
+    private int maxIdle;
+
+    @Value("${db.pool.max.totala:10}")
+    private int maxTotal;
+
+    private BasicDataSource dataSource;
+
+    public Index() {
+    }
+
+    public Index(Path path) {
+        this();
+        setPath(path);
+    }
+
+    public void prepare() {
+        LOGGER.info("Building new index storage in {}", path);
+        dataSource = new BasicDataSource();
+        dataSource.setMinIdle(minIdle);
+        dataSource.setMaxIdle(maxIdle);
+        dataSource.setMaxTotal(maxTotal);
+        dataSource.setDriverClassName(org.h2.Driver.class.getName());
+        dataSource.setUrl("jdbc:h2:file:" + path.toAbsolutePath() + "/.index/index");
+        try {
+            ScriptUtils.executeSqlScript(dataSource.getConnection(), new ClassPathResource("/init.sql"));
+            LOGGER.info("Built new index storage in {}", path);
+        } catch (Throwable e) {
+            LOGGER.error("Failed to build new index storage in {}", path, e);
+        }
+        insertStatement = dataSource.getConnection().prepareStatement();
+    }
+
+    public Path getPath() {
+        return path;
+    }
+
+    public void setPath(Path path) {
+        this.path = path;
+    }
+
+    public void add(Symbol symbol) {
+
+        PreparedStatement insertStatement = dataSource.getConnection().prepareStatement("");
+
+
+        insertStatement.executeUpdate();
+        dataSource.getConnection().prepareStatement();
+    }
+}

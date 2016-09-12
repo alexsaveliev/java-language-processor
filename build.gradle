@@ -15,6 +15,10 @@ apply plugin: 'spring-boot'
 group = 'com.sourcegraph'
 version = '0.0.1-SNAPSHOT'
 
+springBoot {
+    mainClass = "com.sourcegraph.langp.Application"
+}
+
 repositories {
     jcenter()
     maven { url "http://repo.spring.io/snapshot" }
@@ -39,6 +43,10 @@ dependencies {
     compile 'org.eclipse.jgit:org.eclipse.jgit:4.4.1.201607150455-r'
 
     compile 'org.ehcache:ehcache:3.1.1'
+
+    compile 'io.typefox.lsapi:io.typefox.lsapi:0.3.0-SNAPSHOT'
+    compile 'io.typefox.lsapi:io.typefox.lsapi.services:0.3.0-SNAPSHOT'
+    compile 'io.typefox.lsapi:io.typefox.lsapi.annotations:0.3.0-SNAPSHOT'
 
     compileOnly files("${System.properties['java.home']}/../lib/tools.jar")
 

@@ -48,6 +48,8 @@ dependencies {
     compile 'io.typefox.lsapi:io.typefox.lsapi.services:0.3.0-SNAPSHOT'
     compile 'io.typefox.lsapi:io.typefox.lsapi.annotations:0.3.0-SNAPSHOT'
 
+    compile 'org.apache.commons:commons-csv:1.4'
+
     compileOnly files("${System.properties['java.home']}/../lib/tools.jar")
 
 }

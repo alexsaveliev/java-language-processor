@@ -23,6 +23,9 @@ public class Symbol extends DefSpec {
     @JsonIgnore
     private Range range;
 
+    @JsonIgnore
+    private String title;
+
     public String getName() {
         return name;
     }
@@ -61,5 +64,13 @@ public class Symbol extends DefSpec {
 
     public void setRange(Range range) {
         this.range = range;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
     }
 }

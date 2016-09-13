@@ -2,6 +2,7 @@ package com.sourcegraph.common.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sourcegraph.common.configuration.TaskExecutorConfiguration;
 import com.sourcegraph.common.javac.Workspace;
 import com.sourcegraph.common.javac.WorkspaceService;
 import com.sourcegraph.common.model.*;
@@ -37,6 +38,9 @@ public class SymbolServiceTest {
     @Autowired
     private WorkspaceService workspaceService;
 
+    @Autowired
+    private TaskExecutorConfiguration taskExecutorConfiguration;
+
     private Workspace workspace;
 
     @Before
@@ -49,7 +53,7 @@ public class SymbolServiceTest {
     public void tearDown() throws Exception {
         // ensure that no threads are left
         if (workspace != null) {
-            workspace.computeIndexes();
+            workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
             workspace = null;
         }
     }
@@ -79,7 +83,7 @@ public class SymbolServiceTest {
                 "e6e1dca05be97bba8cd9ea5b828191c5c6d2b9db").get();
         workspace = workspaceService.getWorkspace(repoRoot.toPath());
         // wait for indexing completion
-        workspace.computeIndexes();
+        workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
 
         Position position = new Position();
         position.setRepo("github.com/sgtest/java-maven-sample");
@@ -127,7 +131,7 @@ public class SymbolServiceTest {
                 "e6e1dca05be97bba8cd9ea5b828191c5c6d2b9db").get();
         workspace = workspaceService.getWorkspace(repoRoot.toPath());
         // wait for indexing completion
-        workspace.computeIndexes();
+        workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
 
         Position position = new Position();
         position.setRepo("github.com/sgtest/java-maven-sample");
@@ -137,7 +141,7 @@ public class SymbolServiceTest {
         position.setCharacter(29);
         Range definition = symbolService.definition(repositoryService.getWorkspace(position.getRepo(),
                 position.getCommit()).toPath(),
-                position);
+                position).getRange();
         assertNotNull(definition);
         assertEquals("unexpected definition file", "src/main/java/mypkg/FooClass.java", definition.getFile());
         assertEquals("unexpected definition start line", 14, definition.getStartLine());

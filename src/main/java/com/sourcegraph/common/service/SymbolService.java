@@ -1,27 +1,26 @@
 package com.sourcegraph.common.service;
 
-import com.sourcegraph.common.javac.*;
+import com.sourcegraph.common.configuration.TaskExecutorConfiguration;
+import com.sourcegraph.common.javac.SymbolIndex;
+import com.sourcegraph.common.javac.SymbolResultSet;
+import com.sourcegraph.common.javac.Workspace;
+import com.sourcegraph.common.javac.WorkspaceService;
 import com.sourcegraph.common.model.*;
-import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.tree.JCTree;
+import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.FileReader;
 import java.io.IOException;
-import java.io.Reader;
 import java.nio.file.Path;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Provides foundSymbol resolution methods
@@ -43,7 +42,8 @@ public class SymbolService {
     @Autowired
     private WorkspaceService workspaceService;
 
-    private Map<String, Long> offsets = new HashMap<>();
+    @Autowired
+    private TaskExecutorConfiguration taskExecutorConfiguration;
 
     /**
      * @param root     workspace root
@@ -67,34 +67,14 @@ public class SymbolService {
         Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
-        if (!sourceFile.startsWith(root)) {
-            throw new SymbolException("File is outside of workspace");
-        }
-        if (!sourceFile.toFile().isFile()) {
-            throw new SymbolException("File does not exist");
-        }
-
 
         try {
-            SymbolIndex index = getIndex(workspace, sourceFile);
-            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
-                throw new NoDefinitionFoundException();
-            }
-            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
-            if (tree == null) {
-                throw new SymbolException("File does not exist");
-            }
-            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
-            tree.accept(visitor);
-
-            if (visitor.found.isPresent()) {
-                Symbol symbol = visitor.found.get();
-                return getHover(tree, visitor.foundTree, symbol);
-            } else {
-                throw new NoDefinitionFoundException();
-            }
-        } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
+            Symbol s = getSymbol(position, workspace, sourceFile);
+            Hover ret = new Hover();
+            ret.setTitle(s.getTitle());
+            ret.setDocHtml(s.getDocHtml());
+            return ret;
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for hover {}/{} {}:{}",
@@ -114,8 +94,8 @@ public class SymbolService {
      * @throws SymbolException            if no foundSymbol is found
      * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
-    public Range definition(Path root,
-                            Position position) throws
+    public com.sourcegraph.common.model.Symbol definition(Path root,
+                             Position position) throws
             SymbolException,
             NoDefinitionFoundException,
             WorkspaceBeingPreparedException {
@@ -129,36 +109,10 @@ public class SymbolService {
         Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
-        if (!sourceFile.startsWith(root)) {
-            throw new SymbolException("File is outside of workspace");
-        }
-        if (!sourceFile.toFile().isFile()) {
-            throw new SymbolException("File does not exist");
-        }
 
         try {
-            SymbolIndex index = getIndex(workspace, sourceFile);
-            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
-                throw new NoDefinitionFoundException();
-            }
-            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
-            if (tree == null) {
-                throw new SymbolException("File does not exist");
-            }
-            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
-            tree.accept(visitor);
-
-            if (visitor.found.isPresent()) {
-                com.sourcegraph.common.model.Symbol symbol = index.findSymbol(visitor.found.get());
-                if (symbol == null) {
-                    throw new NoDefinitionFoundException();
-                }
-                return symbol.getRange();
-            } else {
-                throw new NoDefinitionFoundException();
-            }
-        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+            return getSymbol(position, workspace, sourceFile);
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for definition {}/{} {}:{}",
@@ -200,45 +154,39 @@ public class SymbolService {
         }
         Workspace workspace = workspaceService.getWorkspace(root);
         Path sourceFile = root.resolve(position.getFile());
-        if (!sourceFile.startsWith(root)) {
-            throw new SymbolException("File is outside of workspace");
-        }
-        if (!sourceFile.toFile().isFile()) {
-            throw new SymbolException("File does not exist");
-        }
 
         RefLocations ret = new RefLocations();
         ret.setRefs(new LinkedList<>());
         try {
-            workspace.computeIndexes();
+            workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
 
-            SymbolIndex index = getIndex(workspace, sourceFile);
-            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+            SymbolIndex index = workspace.findIndex(sourceFile);
+            if (index.isBeingIndexed()) {
+                throw new WorkspaceBeingPreparedException();
+            }
+            if (!index.isIndexed()) {
+                index.index(taskExecutorConfiguration.taskExecutor());
+                throw new WorkspaceBeingPreparedException();
+            }
+            CSVRecord symbol = getSymbol(index, position);
+            if (symbol == null) {
                 throw new NoDefinitionFoundException();
             }
 
-            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
-
-            if (tree == null) {
-                throw new SymbolException("File does not exist");
-            }
-
-            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
-            tree.accept(visitor);
-
-            if (visitor.found.isPresent()) {
-                com.sourcegraph.common.model.Symbol symbol = index.findSymbol(visitor.found.get());
-                if (symbol == null) {
-                    throw new NoDefinitionFoundException();
+            try (SymbolResultSet records = index.getRecords(record -> {
+                boolean match = symbol.get(1).equals(record.get(1));
+                if (match && SymbolIndex.DEF.equals(record.get(0))) {
+                    ret.getRefs().add(SymbolIndex.toRange(record));
+                    return false;
                 }
-                ret.getRefs().add(symbol.getRange());
-                index.references(visitor.found.get()).forEach(ret.getRefs()::add);
+                return match;
+            })) {
+                for (CSVRecord record : records) {
+                    ret.getRefs().add(SymbolIndex.toRange(record));
+                }
                 return ret;
-            } else {
-                throw new NoDefinitionFoundException();
             }
-        } catch (NoDefinitionFoundException | SymbolException | WorkspaceException e) {
+        } catch (NoDefinitionFoundException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for local refs {}:{}/{} {}:{}",
@@ -275,9 +223,28 @@ public class SymbolService {
 
         try {
             Workspace workspace = workspaceService.getWorkspace(root);
-            workspace.computeIndexes();
+            workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
             ExternalRefs ret = new ExternalRefs();
-            ret.setDefs(workspace.getExternalDefs());
+            Collection<SymbolIndex> indexes = workspace.getIndexes();
+            Collection<DefSpec> defSpecs = new LinkedList<>();
+            for (SymbolIndex index : indexes) {
+                try (SymbolResultSet resultSet = index.getRecords(record -> {
+                    if (!SymbolIndex.REF.equals(record.get(0))) {
+                        return false;
+                    }
+                    return !StringUtils.isEmpty(record.get(7));
+                })) {
+                    for (CSVRecord r : resultSet) {
+                        DefSpec spec = new DefSpec();
+                        spec.setRepo(r.get(7));
+                        spec.setUnitType(SymbolIndex.UNIT_TYPE);
+                        spec.setUnit(r.get(8));
+                        spec.setPath(r.get(1));
+                        defSpecs.add(spec);
+                    }
+                }
+            }
+            ret.setDefs(defSpecs);
             return ret;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for external refs {}:{}",
@@ -311,13 +278,21 @@ public class SymbolService {
 
         try {
             Workspace workspace = workspaceService.getWorkspace(root);
-            workspace.computeIndexes();
+            workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
             ExportedSymbols ret = new ExportedSymbols();
-            Collection<com.sourcegraph.common.model.Symbol> symbols = new LinkedList<>();
-            for (com.sourcegraph.common.model.Symbol symbol : workspace.getExportedSymbols()) {
-                symbol.setRepo(repoRev.getRepo());
-                symbol.setCommit(repoRev.getCommit());
-                symbols.add(symbol);
+            Collection<com.sourcegraph.common.model.Symbol> symbols = new HashSet<>();
+
+            Collection<SymbolIndex> indexes = workspace.getIndexes();
+            for (SymbolIndex index : indexes) {
+                try (SymbolResultSet resultSet = index.getRecords(record -> SymbolIndex.DEF.equals(record.get(0)) &&
+                        "true".equals(record.get(12)))) {
+                    for (CSVRecord r : resultSet) {
+                        com.sourcegraph.common.model.Symbol s = SymbolIndex.toSymbol(r);
+                        s.setRepo(repoRev.getRepo());
+                        s.setCommit(repoRev.getCommit());
+                        symbols.add(s);
+                    }
+                }
             }
             ret.setSymbols(symbols);
             return ret;
@@ -349,8 +324,37 @@ public class SymbolService {
         Workspace workspace = workspaceService.getWorkspace(root);
 
         try {
-            return workspace.defSpecToPosition(defSpec);
-        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+            workspace.computeIndexes(taskExecutorConfiguration.taskExecutor());
+            Collection<SymbolIndex> indexes = workspace.getIndexes();
+            for (SymbolIndex index : indexes) {
+                if (index.isBeingIndexed()) {
+                    throw new WorkspaceBeingPreparedException();
+                }
+                if (!index.isIndexed()) {
+                    index.index(taskExecutorConfiguration.taskExecutor());
+                    throw new WorkspaceBeingPreparedException();
+                }
+                try (SymbolResultSet resultSet = index.getRecords(record -> {
+                    if (SymbolIndex.REF.equals(record.get(0))) {
+                        return false;
+                    }
+                    return defSpec.getPath().equals(record.get(1));
+                })) {
+                    Iterator<CSVRecord> defs = resultSet.iterator();
+                    if (defs.hasNext()) {
+                        com.sourcegraph.common.model.Symbol s = SymbolIndex.toSymbol(defs.next());
+                        Position p = new Position();
+                        p.setRepo(defSpec.getRepo());
+                        p.setCommit(defSpec.getCommit());
+                        p.setFile(s.getFile());
+                        p.setLine(s.getRange().getStartLine());
+                        p.setCharacter(s.getRange().getStartCharacter());
+                        return p;
+                    }
+                }
+            }
+            throw new NoDefinitionFoundException();
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for defspec to path {}:{}",
@@ -362,8 +366,8 @@ public class SymbolService {
     }
 
     /**
-     * @param root workspace root
-     * @param position  symbols' position
+     * @param root     workspace root
+     * @param position symbols' position
      * @return def spec of symbol at the given position
      * @throws SymbolException            if no symbol is found
      * @throws NoDefinitionFoundException if there is no symbol at the given position
@@ -383,39 +387,31 @@ public class SymbolService {
         Workspace workspace = workspaceService.getWorkspace(root);
 
         Path sourceFile = root.resolve(position.getFile());
-        if (!sourceFile.startsWith(root)) {
-            throw new SymbolException("File is outside of workspace");
-        }
-        if (!sourceFile.toFile().isFile()) {
-            throw new SymbolException("File does not exist");
-        }
 
         try {
 
-            SymbolIndex index = getIndex(workspace, sourceFile);
-            if (!index.contains(sourceFile.toFile().getAbsolutePath())) {
+            SymbolIndex index = workspace.findIndex(sourceFile);
+            if (index.isBeingIndexed()) {
+                throw new WorkspaceBeingPreparedException();
+            }
+            if (!index.isIndexed()) {
+                index.index(taskExecutorConfiguration.taskExecutor());
+                throw new WorkspaceBeingPreparedException();
+            }
+            CSVRecord symbol = getSymbol(index, position);
+            if (symbol == null) {
                 throw new NoDefinitionFoundException();
             }
-            JCTree.JCCompilationUnit tree = getTree(index, sourceFile);
-            if (tree == null) {
-                throw new SymbolException("File does not exist");
-            }
-            long cursor = findOffset(sourceFile, position.getLine(), position.getCharacter());
-            SymbolUnderCursorVisitor visitor = index.getSymbolUnderCursorVisitor(sourceFile, cursor);
-            tree.accept(visitor);
 
-            if (visitor.found.isPresent()) {
-                com.sourcegraph.common.model.Symbol symbol = index.findSymbol(visitor.found.get());
-                if (symbol == null) {
-                    throw new NoDefinitionFoundException();
-                }
-                symbol.setRepo(position.getRepo());
-                symbol.setCommit(position.getCommit());
-                return symbol;
-            } else {
-                throw new NoDefinitionFoundException();
-            }
-        } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+            DefSpec ret = new DefSpec();
+            ret.setPath(symbol.get(1));
+            ret.setUnit(index.getConfig().unit);
+            ret.setRepo(position.getRepo());
+            ret.setCommit(position.getCommit());
+
+            return ret;
+
+        } catch (NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
             throw e;
         } catch (Exception e) {
             LOGGER.error("An error occurred while looking for position to def spec {}:{}/{} {}:{}",
@@ -429,184 +425,84 @@ public class SymbolService {
     }
 
     /**
-     * @param file            source file
-     * @param targetLine      line
-     * @param targetCharacter character
-     * @return line:character mapped to character-based offset. Lookup is performed in the cache first
+     * @param index    symbol index to look for symbols in
+     * @param position position of symbol
+     * @return symbol at the given position
      */
-    private long findOffset(Path file, int targetLine, int targetCharacter) {
-        String id = file.toString() + ':' + targetLine + ':' + targetCharacter;
-        Long offset = offsets.get(id);
-        if (offset == null) {
-            try {
-                offsets.put(id, offset = computeOffset(file, targetLine, targetCharacter));
-            } catch (IOException ex) {
-                LOGGER.warn("Cannot compute offset for {}", file, ex);
-                offsets.put(id, offset = 0L);
+    private CSVRecord getSymbol(SymbolIndex index, Position position) {
+        CSVRecord symbol = null;
+
+        try (SymbolResultSet resultSet = index.getRecords(record -> {
+            if (!position.getFile().equals(record.get(2))) {
+                return false;
             }
-        }
-        return offset;
-    }
+            int startLine = Integer.parseInt(record.get(3));
+            int startCharacter = Integer.parseInt(record.get(4));
+            int endLine = Integer.parseInt(record.get(5));
+            int endCharacter = Integer.parseInt(record.get(6));
 
-    /**
-     * Computes character-based offset for specific line and column
-     *
-     * @param file            source file
-     * @param targetLine      line
-     * @param targetCharacter character
-     * @return line:character mapped to character-based offset
-     * @throws IOException
-     */
-    private long computeOffset(Path file,
-                               int targetLine,
-                               int targetCharacter) throws IOException {
-        try (Reader in = new FileReader(file.toFile())) {
-            long offset = 0;
-            int line = 0;
-            int character = 0;
+            if (startLine > position.getLine() ||
+                    startLine == position.getLine() && startCharacter > position.getCharacter()) {
+                return false;
+            }
 
-            while (line < targetLine) {
-                int next = in.read();
+            if (endLine < position.getLine() ||
+                    endLine == position.getLine() && endCharacter < position.getCharacter()) {
+                return false;
+            }
 
-                if (next < 0)
-                    return offset;
-                else {
-                    offset++;
+            return true;
+        })) {
+            for (CSVRecord r : resultSet) {
+                if (symbol == null) {
+                    symbol = r;
+                } else {
 
-                    if (next == '\n')
-                        line++;
+                    int rStartLine = Integer.parseInt(r.get(3));
+                    int rStartCharacter = Integer.parseInt(r.get(4));
+                    int rEndLine = Integer.parseInt(r.get(5));
+                    int rEndCharacter = Integer.parseInt(r.get(6));
+
+                    int sStartLine = Integer.parseInt(symbol.get(3));
+                    int sStartCharacter = Integer.parseInt(symbol.get(4));
+                    int sEndLine = Integer.parseInt(symbol.get(5));
+                    int sEndCharacter = Integer.parseInt(symbol.get(6));
+
+                    if (rStartLine > sStartLine ||
+                            rEndLine < sEndLine ||
+                            rStartLine == sStartLine && rStartCharacter > sStartCharacter ||
+                            rEndLine == sEndLine && rEndCharacter < sEndCharacter) {
+                        symbol = r;
+                    }
                 }
             }
+        } catch (IOException ex) {
+            LOGGER.warn("An I/O error while reading index data", ex);
+        }
+        return symbol;
+    }
 
-            while (character < targetCharacter) {
-                int next = in.read();
-
-                if (next < 0)
-                    return offset;
-                else {
-                    offset++;
-                    character++;
-                }
+    private com.sourcegraph.common.model.Symbol getSymbol(Position position, Workspace workspace, Path sourceFile) throws WorkspaceBeingPreparedException, NoDefinitionFoundException, IOException {
+        SymbolIndex index = workspace.findIndex(sourceFile);
+        if (index.isBeingIndexed()) {
+            throw new WorkspaceBeingPreparedException();
+        }
+        if (!index.isIndexed()) {
+            index.index(taskExecutorConfiguration.taskExecutor());
+            throw new WorkspaceBeingPreparedException();
+        }
+        CSVRecord symbol = getSymbol(index, position);
+        if (symbol == null) {
+            throw new NoDefinitionFoundException();
+        }
+        try (SymbolResultSet resultSet = index.getRecords(record -> !SymbolIndex.REF.equals(record.get(0)) &&
+                symbol.get(1).equals(record.get(1)))) {
+            Iterator<CSVRecord> defs = resultSet.iterator();
+            if (!defs.hasNext()) {
+                throw new NoDefinitionFoundException();
             }
-
-            return offset;
+            return SymbolIndex.toSymbol(defs.next());
         }
     }
-
-    /**
-     * Waits for N milliseconds to acquire tree object
-     *
-     * @param index foundSymbol index
-     * @param path  file path
-     * @return tree object if ready
-     * @throws WorkspaceBeingPreparedException if tree object is being prepared
-     * @throws WorkspaceException              if workspace configuration error occurred
-     */
-    private JCTree.JCCompilationUnit getTree(SymbolIndex index, Path path)
-            throws WorkspaceBeingPreparedException, WorkspaceException {
-        Future<JCTree.JCCompilationUnit> future = index.get(path.toFile().getAbsolutePath());
-        if (future == null) {
-            throw new WorkspaceBeingPreparedException();
-        }
-        try {
-            return future.get(timeout, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred while fetching tree for {}", path, e);
-            throw new WorkspaceException(e);
-        } catch (TimeoutException e) {
-            throw new WorkspaceBeingPreparedException();
-        }
-    }
-
-    /**
-     * Waits for N milliseconds to acquire index object
-     *
-     * @param workspace workspace
-     * @param path      file path
-     * @return index object if ready
-     * @throws WorkspaceBeingPreparedException if index object is being prepared
-     * @throws WorkspaceException              if workspace configuration error occurred
-     */
-    private SymbolIndex getIndex(Workspace workspace, Path path)
-            throws WorkspaceBeingPreparedException, WorkspaceException {
-        Future<SymbolIndex> future = workspace.findIndex(path);
-        if (future == null) {
-            throw new WorkspaceBeingPreparedException();
-        }
-        try {
-            return future.get(timeout, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred while fetching index for {}", path, e);
-            throw new WorkspaceException(e);
-        } catch (TimeoutException e) {
-            throw new WorkspaceBeingPreparedException();
-        }
-    }
-
-    /**
-     * @param tree        compilation unit
-     * @param foundTree   found AST node
-     * @param foundSymbol found symbol
-     * @return hover content for specific symbol
-     */
-    private Hover getHover(JCTree.JCCompilationUnit tree,
-                           JCTree foundTree,
-                           Symbol foundSymbol) {
-        Hover ret = new Hover();
-
-        String text = tree.docComments.getCommentText(foundTree);
-        if (text != null) {
-            ret.setDocHtml(text);
-        }
-
-        switch (foundSymbol.getKind()) {
-            case PACKAGE:
-                ret.setTitle("package " + foundSymbol.getQualifiedName());
-
-                break;
-            case ENUM:
-                ret.setTitle("enum " + foundSymbol.getQualifiedName());
-
-                break;
-            case CLASS:
-                ret.setTitle("class " + foundSymbol.getQualifiedName());
-
-                break;
-            case ANNOTATION_TYPE:
-                ret.setTitle("@interface " + foundSymbol.getQualifiedName());
-
-                break;
-            case INTERFACE:
-                ret.setTitle("interface " + foundSymbol.getQualifiedName());
-
-                break;
-            case METHOD:
-            case CONSTRUCTOR:
-            case STATIC_INIT:
-            case INSTANCE_INIT:
-                Symbol.MethodSymbol method = (Symbol.MethodSymbol) foundSymbol;
-                String signature = ShortTypePrinter.methodSignature(method);
-                String returnType = ShortTypePrinter.print(method.getReturnType());
-
-                ret.setTitle(returnType + " " + signature);
-
-                break;
-            case PARAMETER:
-            case LOCAL_VARIABLE:
-            case EXCEPTION_PARAMETER:
-            case ENUM_CONSTANT:
-            case FIELD:
-                ret.setTitle(ShortTypePrinter.print(foundSymbol.type));
-
-                break;
-            case TYPE_PARAMETER:
-            case OTHER:
-            case RESOURCE_VARIABLE:
-                break;
-        }
-
-        return ret;
-    }
-
 
 }

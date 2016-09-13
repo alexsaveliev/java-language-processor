@@ -21,6 +21,10 @@ class AndroidOrigin {
     private static final String ANDROID_SUPPORT_REPO = "android.googlesource.com/platform/frameworks/support";
     private static final String ANDROID_CORE_REPO = "android.googlesource.com/platform/libcore";
 
+    private static final OriginEntry ANDROID_SDK_REPO_ENTRY = new OriginEntry(ANDROID_SDK_REPO, "AndroidSDK");
+    private static final OriginEntry ANDROID_SUPPORT_REPO_ENTRY = new OriginEntry(ANDROID_SUPPORT_REPO, "AndroidSupport");
+    private static final OriginEntry ANDROID_CORE_REPO_ENTRY = new OriginEntry(ANDROID_CORE_REPO, "AndroidCore");
+
     private static List<String> libcoreClasses;
     private static List<String> supportClasses;
     private static List<String> sdkClasses;
@@ -41,24 +45,24 @@ class AndroidOrigin {
      *              Android Support framework. I.e. we are sure that origin belongs to Android
      * @return resolved target or null if resolution failed
      */
-    static String resolve(URI origin, boolean force) {
+    static OriginEntry resolve(URI origin, boolean force) {
         String topClassName = extractTopClassName(origin);
         if (topClassName == null) {
             return null;
         }
         int index = Collections.binarySearch(libcoreClasses, topClassName);
         if (index >= 0) {
-            return ANDROID_CORE_REPO;
+            return ANDROID_CORE_REPO_ENTRY;
         } else {
             index = Collections.binarySearch(supportClasses, topClassName);
             if (index >= 0) {
-                return ANDROID_SUPPORT_REPO;
+                return ANDROID_SUPPORT_REPO_ENTRY;
             }
             if (force) {
-                return ANDROID_SDK_REPO;
+                return ANDROID_SDK_REPO_ENTRY;
             }
             if (Collections.binarySearch(sdkClasses, topClassName) >= 0) {
-                return ANDROID_SDK_REPO;
+                return ANDROID_SDK_REPO_ENTRY;
             }
             return null;
         }

@@ -46,7 +46,7 @@ public class LanguageProcessorController {
             SymbolException,
             NoDefinitionFoundException {
         Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
-        Range ret = symbolService.definition(root, pos);
+        Range ret = symbolService.definition(root, pos).getRange();
         ret.setRepo(pos.getRepo());
         ret.setCommit(pos.getCommit());
         return ret;

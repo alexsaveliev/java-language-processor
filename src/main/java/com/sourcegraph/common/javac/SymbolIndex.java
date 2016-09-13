@@ -1,16 +1,18 @@
 package com.sourcegraph.common.javac;
 
-import com.sourcegraph.common.model.DefSpec;
+import com.sourcegraph.common.model.Hover;
 import com.sourcegraph.common.model.JavacConfig;
-import com.sourcegraph.common.model.Position;
 import com.sourcegraph.common.model.Range;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.Name;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,10 +21,9 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
-import java.io.File;
-import java.io.IOException;
-import java.io.Reader;
+import java.io.*;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.*;
@@ -34,400 +35,41 @@ public class SymbolIndex {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SymbolIndex.class);
 
-    private static final String UNIT_TYPE = "JavaArtifact";
-
-    private static class SourceFileIndex {
-        private final EnumMap<ElementKind, Map<String, com.sourcegraph.common.model.Symbol>> declarations =
-                new EnumMap<>(ElementKind.class);
-        private final EnumMap<ElementKind, Map<String, Set<Range>>> references = new EnumMap<>(ElementKind.class);
-    }
+    /**
+     * Def's marker in CSV
+     */
+    public static final String DEF = "def";
 
     /**
-     * Source path files, for which we support methods and classes
+     * Ref's marker in CSV
      */
-    private Map<URI, SourceFileIndex> sourcePath = new ConcurrentHashMap<>();
+    public static final String REF = "ref";
 
     /**
-     * Active files, for which we index locals
+     * Marks that reference points to external repository but we weren't able to extract it
      */
-    private Map<String, Future<JCTree.JCCompilationUnit>> activeDocuments = new ConcurrentHashMap<>();
+    private static final String UNKNOWN_REPOSITORY = "?";
+
+    public  static final String UNIT_TYPE = "JavaArtifact";
 
     private Path root;
 
-    private Workspace workspace;
-
     private JavacConfig config;
 
-    private ExecutorService executorService;
+    private Future<SymbolIndex> future;
 
-    private Trees trees;
-
-    public SymbolIndex(JavacConfig config,
-                       Path root,
-                       Workspace workspace,
-                       ExecutorService executorService) {
+    SymbolIndex(JavacConfig config,
+                Path root) {
 
         this.config = config;
         this.root = root;
-        this.workspace = workspace;
-        this.executorService = executorService;
     }
 
     /**
-     * @param symbol local symbol
-     * @return references to a local symbol
+     * @return associated configuration object
      */
-    public Collection<Range> references(Symbol symbol) {
-        // For indexed symbols, just look up the precomputed references
-
-        Collection<Range> references = new LinkedList<>();
-        if (shouldIndex(symbol)) {
-            String key = uniqueName(symbol);
-            for (SourceFileIndex index : sourcePath.values()) {
-                Map<String, Set<Range>> withKind = index.references.getOrDefault(symbol.getKind(),
-                        Collections.emptyMap());
-                Collection<Range> results = withKind.get(key);
-                if (results != null) {
-                    references.addAll(results);
-                }
-            }
-        }
-        // For non-indexed symbols, scan the active set
-        else {
-            for (Future<JCTree.JCCompilationUnit> documentFuture : activeDocuments.values()) {
-                final JCTree.JCCompilationUnit document;
-                try {
-                    document = documentFuture.get();
-                } catch (InterruptedException | ExecutionException e) {
-                    LOGGER.error("An error occurred while retrieving index", e);
-                    continue;
-                }
-                document.accept(new TreeScanner() {
-                    @Override
-                    public void visitSelect(JCTree.JCFieldAccess tree) {
-                        super.visitSelect(tree);
-
-                        if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, document));
-                    }
-
-                    @Override
-                    public void visitReference(JCTree.JCMemberReference tree) {
-                        super.visitReference(tree);
-
-                        if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, document));
-                    }
-
-                    @Override
-                    public void visitIdent(JCTree.JCIdent tree) {
-                        super.visitIdent(tree);
-
-                        if (tree.sym != null && tree.sym.equals(symbol))
-                            references.add(range(tree, document));
-                    }
-                });
-            }
-        }
-        return references;
-    }
-
-    /**
-     * @return all local definitions
-     */
-    public Collection<com.sourcegraph.common.model.Symbol> definitions() {
-        Collection<com.sourcegraph.common.model.Symbol> ret = new LinkedList<>();
-        for (SourceFileIndex index : sourcePath.values()) {
-            for (Map<String, com.sourcegraph.common.model.Symbol> withKind : index.declarations.values()) {
-                ret.addAll(withKind.values());
-            }
-        }
-        return ret;
-    }
-
-    /**
-     * @param symbol symbol to search for
-     * @return symbol's information
-     */
-    public com.sourcegraph.common.model.Symbol findSymbol(Symbol symbol) {
-        ElementKind kind = symbol.getKind();
-        String key = uniqueName(symbol);
-
-        for (SourceFileIndex f : sourcePath.values()) {
-            Map<String, com.sourcegraph.common.model.Symbol> withKind = f.declarations.getOrDefault(kind,
-                    Collections.emptyMap());
-            com.sourcegraph.common.model.Symbol sym = withKind.get(key);
-            if (sym != null) {
-                return sym;
-            }
-        }
-
-        for (Future<JCTree.JCCompilationUnit> future : activeDocuments.values()) {
-            JCTree.JCCompilationUnit compilationUnit;
-            try {
-                compilationUnit = future.get(100, TimeUnit.MILLISECONDS);
-            } catch (TimeoutException e) {
-                return null;
-            } catch (InterruptedException | ExecutionException e) {
-                LOGGER.error("An error occurred", e);
-                return null;
-            }
-            JCTree symbolTree = TreeInfo.declarationFor(symbol, compilationUnit);
-            if (symbolTree != null) {
-                Range range = range(symbolTree, compilationUnit);
-                com.sourcegraph.common.model.Symbol s = new com.sourcegraph.common.model.Symbol();
-                s.setRange(range);
-                s.setName(symbol.getQualifiedName().toString());
-                s.setPath(key);
-                s.setKind(symbol.getKind().name().toLowerCase());
-                s.setDocHtml(compilationUnit.docComments.getCommentText(symbolTree));
-                s.setFile(root.toUri().relativize(compilationUnit.getSourceFile().toUri()).toString());
-                return s;
-
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Traverses AST trees and collects references and definitions
-     */
-    private class Indexer extends BaseScanner {
-
-        private SourceFileIndex index;
-
-        private JCTree.JCCompilationUnit tree;
-
-        @Override
-        public void visitTopLevel(JCTree.JCCompilationUnit tree) {
-            URI uri = tree.getSourceFile().toUri();
-            this.tree = tree;
-            index = new SourceFileIndex();
-            sourcePath.put(uri, index);
-            super.visitTopLevel(tree);
-
-        }
-
-        @Override
-        public void visitClassDef(JCTree.JCClassDecl tree) {
-            super.visitClassDef(tree);
-
-            addDeclaration(tree, tree.sym);
-        }
-
-        @Override
-        public void visitMethodDef(JCTree.JCMethodDecl tree) {
-            super.visitMethodDef(tree);
-
-            addDeclaration(tree, tree.sym);
-        }
-
-        @Override
-        public void visitVarDef(JCTree.JCVariableDecl tree) {
-            super.visitVarDef(tree);
-
-            addDeclaration(tree, tree.sym);
-        }
-
-        @Override
-        public void visitSelect(JCTree.JCFieldAccess tree) {
-            super.visitSelect(tree);
-
-            addReference(tree, tree.sym);
-        }
-
-        @Override
-        public void visitReference(JCTree.JCMemberReference tree) {
-            super.visitReference(tree);
-
-            addReference(tree, tree.sym);
-        }
-
-        @Override
-        public void visitIdent(JCTree.JCIdent tree) {
-            addReference(tree, tree.sym);
-        }
-
-        @Override
-        public void visitNewClass(JCTree.JCNewClass tree) {
-            super.visitNewClass(tree);
-
-            addReference(tree, tree.constructor);
-        }
-
-        /**
-         * Adds new definition
-         *
-         * @param tree
-         * @param symbol
-         */
-        private void addDeclaration(JCTree tree, Symbol symbol) {
-            if (symbol != null && shouldIndex(symbol)) {
-                String key = uniqueName(symbol);
-                Range range = range(tree, compilationUnit);
-                Map<String, com.sourcegraph.common.model.Symbol> withKind = index.declarations.computeIfAbsent(
-                        symbol.getKind(),
-                        newKind -> new HashMap<>());
-                com.sourcegraph.common.model.Symbol s = new com.sourcegraph.common.model.Symbol();
-                s.setRange(range);
-                s.setName(symbol.getQualifiedName().toString());
-                s.setPath(key);
-                s.setKind(symbol.getKind().name().toLowerCase());
-                s.setDocHtml(this.tree.docComments.getCommentText(tree));
-                s.setFile(root.toUri().relativize(this.tree.getSourceFile().toUri()).toString());
-                s.setUnitType(UNIT_TYPE);
-                s.setUnit(config.unit);
-                withKind.put(key, s);
-            }
-        }
-
-        /**
-         * Adds new reference
-         *
-         * @param tree
-         * @param symbol
-         */
-        private void addReference(JCTree tree, Symbol symbol) {
-            if (symbol != null && shouldIndex(symbol)) {
-                String key = uniqueName(symbol);
-                JavaFileObject externalOrigin = getExternalOrigin(symbol);
-                if (externalOrigin == null) {
-                    Map<String, Set<Range>> withKind = index.references.computeIfAbsent(symbol.getKind(),
-                            newKind -> new HashMap<>());
-                    Set<Range> ranges = withKind.computeIfAbsent(key, newName -> new HashSet<>());
-                    Range range = range(tree, compilationUnit);
-                    ranges.add(range);
-                } else {
-                    String repository = Origin.getRepository(externalOrigin, config);
-                    if (repository != null) {
-                        DefSpec def = new DefSpec();
-                        def.setPath(key);
-                        def.setRepo(repository);
-                        workspace.getExternalDefs().add(def);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * @param symbol
-     * @return true if we should keep index for a given symbol's kind
-     */
-    private static boolean shouldIndex(Symbol symbol) {
-        ElementKind kind = symbol.getKind();
-
-        switch (kind) {
-            case ENUM:
-            case ANNOTATION_TYPE:
-            case INTERFACE:
-            case ENUM_CONSTANT:
-            case FIELD:
-            case METHOD:
-                return true;
-            case CLASS:
-                return !symbol.isAnonymous();
-            case CONSTRUCTOR:
-                // TODO also skip generated constructors
-                return !symbol.getEnclosingElement().isAnonymous();
-            default:
-                return false;
-        }
-    }
-
-    /**
-     * @param tree
-     * @param compilationUnit
-     * @return range object for a given node
-     */
-    private Range range(JCTree tree, JCTree.JCCompilationUnit compilationUnit) {
-        try {
-            // Declaration should include offset
-            int offset = tree.pos;
-            int end = tree.getEndPosition(null);
-
-            // If symbol is a class, offset points to 'class' keyword, not name
-            // Find the name by searching the text of the source, starting at the 'class' keyword
-            if (tree instanceof JCTree.JCClassDecl) {
-                Symbol.ClassSymbol symbol = ((JCTree.JCClassDecl) tree).sym;
-                offset = offset(compilationUnit, symbol, offset);
-                end = offset + symbol.name.length();
-            } else if (tree instanceof JCTree.JCMethodDecl) {
-                Symbol.MethodSymbol symbol = ((JCTree.JCMethodDecl) tree).sym;
-                offset = offset(compilationUnit, symbol, offset);
-                end = offset + symbol.name.length();
-            } else if (tree instanceof JCTree.JCVariableDecl) {
-                Symbol.VarSymbol symbol = ((JCTree.JCVariableDecl) tree).sym;
-                offset = offset(compilationUnit, symbol, offset);
-                end = offset + symbol.name.length();
-            }
-
-            Range range = findRange(compilationUnit.getSourceFile(), offset, end);
-            URI full = compilationUnit.getSourceFile().toUri();
-            String uri = root.toUri().relativize(full).toString();
-            range.setFile(uri);
-            return range;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static int offset(JCTree.JCCompilationUnit compilationUnit,
-                              Symbol symbol,
-                              int estimate) throws IOException {
-        CharSequence content = compilationUnit.sourcefile.getCharContent(false);
-        Name name = symbol.getSimpleName();
-
-        estimate = indexOf(content, name, estimate);
-        return estimate;
-    }
-
-    /**
-     * Adapted from java.util.String.
-     * <p>
-     * The source is the character array being searched, and the target
-     * is the string being searched for.
-     *
-     * @param source    the characters being searched.
-     * @param target    the characters being searched for.
-     * @param fromIndex the index to begin searching from.
-     */
-    private static int indexOf(CharSequence source, CharSequence target, int fromIndex) {
-        int sourceOffset = 0, sourceCount = source.length(), targetOffset = 0, targetCount = target.length();
-
-        if (fromIndex >= sourceCount) {
-            return (targetCount == 0 ? sourceCount : -1);
-        }
-        if (fromIndex < 0) {
-            fromIndex = 0;
-        }
-        if (targetCount == 0) {
-            return fromIndex;
-        }
-
-        char first = target.charAt(targetOffset);
-        int max = sourceOffset + (sourceCount - targetCount);
-
-        for (int i = sourceOffset + fromIndex; i <= max; i++) {
-            /* Look for first character. */
-            if (source.charAt(i) != first) {
-                while (++i <= max && source.charAt(i) != first) ;
-            }
-
-            /* Found first character, now look at the rest of v2 */
-            if (i <= max) {
-                int j = i + 1;
-                int end = j + targetCount - 1;
-                for (int k = targetOffset + 1; j < end && source.charAt(j) == target.charAt(k); j++, k++) ;
-
-                if (j == end) {
-                    /* Found whole string. */
-                    return i - sourceOffset;
-                }
-            }
-        }
-        return -1;
+    public JavacConfig getConfig() {
+        return config;
     }
 
     /**
@@ -482,18 +124,6 @@ public class SymbolIndex {
             if (!s.getSimpleName().isEmpty())
                 acc.add(s.getSimpleName().toString());
         }
-    }
-
-    public Future<JCTree.JCCompilationUnit> get(String sourceFile) {
-        return activeDocuments.get(sourceFile);
-    }
-
-    /**
-     * @param sourceFile source file to check
-     * @return true if this index contains file (file is indexable)
-     */
-    public boolean contains(String sourceFile) {
-        return config.files.contains(sourceFile);
     }
 
     private static Range findRange(JavaFileObject file, long startOffset, long endOffset) throws IOException {
@@ -552,12 +182,13 @@ public class SymbolIndex {
      */
     private class IndexBuilder implements Callable<SymbolIndex> {
 
-        private Path root;
         private JavacConfig config;
 
-        IndexBuilder(Path root, JavacConfig config) {
-            this.root = root;
+        private ExecutorService executorService;
+
+        IndexBuilder(JavacConfig config, ExecutorService executorService) {
             this.config = config;
+            this.executorService = executorService;
         }
 
         @Override
@@ -566,22 +197,27 @@ public class SymbolIndex {
             JavacHolder javacHolder = new JavacHolder(config);
             Iterable<? extends JavaFileObject> sources;
             sources = getSourceFiles(javacHolder.fileManager);
-            Iterable<? extends CompilationUnitTree> units;
-            units = javacHolder.compile(sources);
-            trees = javacHolder.trees;
+            Iterable<? extends CompilationUnitTree> units = javacHolder.compile(sources);
             CompletionService<JCTree.JCCompilationUnit> completionService =
                     new ExecutorCompletionService<>(executorService);
+
+            File indexFile = getIndexWriteFile();
+
+            CSVPrinter printer = CSVFormat.DEFAULT.print(new BufferedWriter(new OutputStreamWriter(
+                    new FileOutputStream(indexFile),
+                    "utf-8")));
+
+            ThreadSafeCSVPrinter threadSafeCSVPrinter = new ThreadSafeCSVPrinter(printer);
 
             int total = 0;
             for (CompilationUnitTree unit : units) {
                 JCTree.JCCompilationUnit jcCompilationUnit = (JCTree.JCCompilationUnit) unit;
                 total++;
-                activeDocuments.put(new File(unit.getSourceFile().getName()).getAbsolutePath(),
-                        completionService.submit(() -> {
+                completionService.submit(() -> {
                     LOGGER.info("Indexing {}", unit.getSourceFile().getName());
-                    jcCompilationUnit.accept(new Indexer());
+                    jcCompilationUnit.accept(new Indexer(javacHolder.trees, threadSafeCSVPrinter));
                     return jcCompilationUnit;
-                }));
+                });
             }
             boolean errors = false;
             while (total > 0 && !errors) {
@@ -594,6 +230,13 @@ public class SymbolIndex {
                 }
                 total--;
             }
+            threadSafeCSVPrinter.flush();
+            threadSafeCSVPrinter.close();
+
+            // atomic rename to destination
+            indexFile.renameTo(getIndexFile());
+
+            future = null;
             LOGGER.info("Built indexes for [{}]", StringUtils.join(config.sources, ' '));
             return SymbolIndex.this;
         }
@@ -604,38 +247,469 @@ public class SymbolIndex {
         }
     }
 
-    public SymbolUnderCursorVisitor getSymbolUnderCursorVisitor(Path sourceFile, long cursor) {
-        return new SymbolUnderCursorVisitor(cursor, trees);
-    }
-
     /**
      * Starts indexing
      *
      * @return
      */
-    public Future<SymbolIndex> index() {
-        return this.executorService.submit(new IndexBuilder(root, config));
+    public Future<SymbolIndex> index(ExecutorService executorService) {
+        future = executorService.submit(new IndexBuilder(config, executorService));
+        return future;
     }
 
     /**
-     * @param defSpec
-     * @return position of symbol defined by a given path if found
+     * @return true if symbols are being indexed
      */
-    Position defSpecToPosition(DefSpec defSpec) {
-        for (SourceFileIndex index : sourcePath.values()) {
-            for (Map<String, com.sourcegraph.common.model.Symbol> withKind : index.declarations.values()) {
-                for (com.sourcegraph.common.model.Symbol symbol : withKind.values()) {
-                    if (symbol.getPath().equals(defSpec.getPath())) {
-                        Position ret = new Position();
-                        ret.setFile(symbol.getFile());
-                        ret.setLine(symbol.getRange().getStartLine());
-                        ret.setCharacter(symbol.getRange().getStartCharacter());
-                        return ret;
-                    }
+    public boolean isBeingIndexed() {
+        return future != null;
+    }
+
+    /**
+     * @return pending index task
+     */
+    public Future<SymbolIndex> getIndexTask() {
+        return future;
+    }
+
+    /**
+     * @return true if symbols are indexed
+     */
+    public boolean isIndexed() {
+        return getIndexFile().exists();
+    }
+
+    /**
+     * @param acceptor function that identifies records' acceptance
+     * @return index records matching given function
+     */
+    public SymbolResultSet getRecords(Acceptor acceptor) throws IOException {
+        return new SymbolResultSet(getIndex(), acceptor);
+    }
+
+    /**
+     * Transforms CSV record to Symbol
+     *
+     * @param record CSV record to transform
+     * @return symbol object
+     */
+    public static com.sourcegraph.common.model.Symbol toSymbol(CSVRecord record) {
+        com.sourcegraph.common.model.Symbol s = new com.sourcegraph.common.model.Symbol();
+        s.setPath(record.get(1));
+        s.setFile(record.get(2));
+        Range r = toRange(record);
+        s.setRange(r);
+        s.setName(record.get(7));
+        s.setKind(record.get(8));
+        s.setUnit(record.get(9));
+        s.setTitle(record.get(10));
+        s.setDocHtml(record.get(11));
+        return s;
+    }
+
+    /**
+     * Transforms CSV record to range
+     *
+     * @param record record to transform
+     * @return range object
+     */
+    public static Range toRange(CSVRecord record) {
+        Range r = new Range();
+        r.setFile(record.get(2));
+        r.setStartLine(Integer.parseInt(record.get(3)));
+        r.setStartCharacter(Integer.parseInt(record.get(4)));
+        r.setEndLine(Integer.parseInt(record.get(5)));
+        r.setEndCharacter(Integer.parseInt(record.get(6)));
+        return r;
+    }
+
+    /**
+     * @return CSV parser to parse index file
+     */
+    private CSVParser getIndex() throws IOException {
+
+        return CSVFormat.DEFAULT.parse(new BufferedReader(new InputStreamReader(
+                new FileInputStream(getIndexFile()),
+                "utf-8")));
+    }
+
+    /**
+     * @return file containing CSV index
+     */
+    private File getIndexFile() {
+        File directory = config.getFile().toFile().getParentFile();
+        return new File(directory, ".index");
+    }
+
+    /**
+     * @return file containing CSV index (to write)
+     */
+    private File getIndexWriteFile() throws IOException {
+        return Files.createTempFile(config.getFile().getParent(), "index", "idx").toFile();
+    }
+
+    /**
+     * Thread safe CSV printer allows multiple threads to print records to output file (we don't care about records order)
+     */
+    private static class ThreadSafeCSVPrinter {
+
+        private CSVPrinter delegate;
+
+        ThreadSafeCSVPrinter(CSVPrinter delegate) {
+            this.delegate = delegate;
+        }
+
+        synchronized void printRecord(Iterable<?> values) throws IOException {
+            delegate.printRecord(values);
+        }
+
+        synchronized void close() throws IOException {
+            delegate.close();
+        }
+
+        synchronized void flush() throws IOException {
+            delegate.flush();
+        }
+    }
+
+    /**
+     * Traverses AST trees and collects references and definitions
+     */
+    private class Indexer extends TreeScanner {
+
+        private JCTree.JCCompilationUnit tree;
+
+        private ThreadSafeCSVPrinter printer;
+
+        private Trees trees;
+
+        Indexer(Trees trees, ThreadSafeCSVPrinter printer) {
+            this.trees = trees;
+            this.printer = printer;
+        }
+
+        @Override
+        public void visitTopLevel(JCTree.JCCompilationUnit tree) {
+            this.tree = tree;
+            super.visitTopLevel(tree);
+        }
+
+        @Override
+        public void visitClassDef(JCTree.JCClassDecl tree) {
+            super.visitClassDef(tree);
+
+            addDeclaration(tree, tree.sym);
+        }
+
+        @Override
+        public void visitMethodDef(JCTree.JCMethodDecl tree) {
+            super.visitMethodDef(tree);
+
+            addDeclaration(tree, tree.sym);
+        }
+
+        @Override
+        public void visitVarDef(JCTree.JCVariableDecl tree) {
+            super.visitVarDef(tree);
+
+            addDeclaration(tree, tree.sym);
+        }
+
+        @Override
+        public void visitSelect(JCTree.JCFieldAccess tree) {
+            super.visitSelect(tree);
+
+            addReference(tree, tree.sym);
+        }
+
+        @Override
+        public void visitReference(JCTree.JCMemberReference tree) {
+            super.visitReference(tree);
+
+            addReference(tree, tree.sym);
+        }
+
+        @Override
+        public void visitIdent(JCTree.JCIdent tree) {
+            addReference(tree, tree.sym);
+        }
+
+        @Override
+        public void visitNewClass(JCTree.JCNewClass tree) {
+            super.visitNewClass(tree);
+
+            addReference(tree, tree.constructor);
+        }
+
+        /**
+         * Adds new definition
+         *
+         * @param tree
+         * @param symbol
+         */
+        private void addDeclaration(JCTree tree, Symbol symbol) {
+            if (symbol != null && shouldIndex(symbol)) {
+                String key = uniqueName(symbol);
+                Range range = range(tree, this.tree);
+                com.sourcegraph.common.model.Symbol s = new com.sourcegraph.common.model.Symbol();
+                s.setRange(range);
+                s.setName(symbol.getQualifiedName().toString());
+                s.setPath(key);
+                s.setKind(symbol.getKind().name().toLowerCase());
+                s.setDocHtml(this.tree.docComments.getCommentText(tree));
+                s.setFile(root.toUri().relativize(this.tree.getSourceFile().toUri()).toString());
+                s.setUnitType(UNIT_TYPE);
+                s.setUnit(config.unit);
+
+                Collection<Object> record = new LinkedList<>();
+                record.add(DEF);
+                record.add(s.getPath());
+                record.add(s.getFile());
+                record.add(s.getRange().getStartLine());
+                record.add(s.getRange().getStartCharacter());
+                record.add(s.getRange().getEndLine());
+                record.add(s.getRange().getEndCharacter());
+                record.add(s.getName());
+                record.add(s.getKind());
+                record.add(config.unit);
+                record.add(getTitle(this.tree, tree, symbol));
+                record.add(s.getDocHtml());
+                record.add(isExported(symbol));
+
+                try {
+                    printer.printRecord(record);
+                } catch (IOException e) {
+                    LOGGER.warn("Cannot record declaration", e);
                 }
             }
         }
-        return null;
+
+        /**
+         * Adds new reference
+         *
+         * @param tree
+         * @param symbol
+         */
+        private void addReference(JCTree tree, Symbol symbol) {
+            if (symbol != null && shouldIndex(symbol)) {
+                String key = uniqueName(symbol);
+                JavaFileObject externalOrigin = getExternalOrigin(symbol);
+
+                Collection<Object> record = new LinkedList<>();
+                record.add(REF);
+                record.add(key);
+
+                Range range = range(tree, this.tree);
+
+                record.add(range.getFile());
+                record.add(range.getStartLine());
+                record.add(range.getStartCharacter());
+                record.add(range.getEndLine());
+                record.add(range.getEndCharacter());
+
+                if (externalOrigin == null) {
+                    record.add(StringUtils.EMPTY);
+                } else {
+                    OriginEntry originEntry = Origin.getRepository(externalOrigin, config);
+                    if (originEntry!= null) {
+                        record.add(originEntry.repo);
+                        record.add(originEntry.unit);
+                    } else {
+                        record.add(UNKNOWN_REPOSITORY);
+                        record.add(UNKNOWN_REPOSITORY);
+                    }
+                }
+
+                try {
+                    printer.printRecord(record);
+                } catch (IOException e) {
+                    LOGGER.warn("Cannot record definition", e);
+                }
+
+            }
+        }
+
+        /**
+         * @param tree
+         * @param compilationUnit
+         * @return range object for a given node
+         */
+        private Range range(JCTree tree, JCTree.JCCompilationUnit compilationUnit) {
+            try {
+                // Declaration should include offset
+                int start = (int) trees.getSourcePositions().getStartPosition(compilationUnit, tree);
+                int end = (int) trees.getSourcePositions().getEndPosition(compilationUnit, tree);
+
+                // If symbol is a class, offset points to 'class' keyword, not name
+                // Find the name by searching the text of the source, starting at the 'class' keyword
+                if (tree instanceof JCTree.JCClassDecl) {
+                    Symbol.ClassSymbol symbol = ((JCTree.JCClassDecl) tree).sym;
+                    start = offset(compilationUnit, symbol, start);
+                    end = start + symbol.name.length();
+                } else if (tree instanceof JCTree.JCMethodDecl) {
+                    Symbol.MethodSymbol symbol = ((JCTree.JCMethodDecl) tree).sym;
+                    start = offset(compilationUnit, symbol, start);
+                    end = start + symbol.name.length();
+                } else if (tree instanceof JCTree.JCVariableDecl) {
+                    Symbol.VarSymbol symbol = ((JCTree.JCVariableDecl) tree).sym;
+                    start = offset(compilationUnit, symbol, start);
+                    end = start + symbol.name.length();
+                }
+
+                Range range = findRange(compilationUnit.getSourceFile(), start, end);
+                URI full = compilationUnit.getSourceFile().toUri();
+                String uri = root.toUri().relativize(full).toString();
+                range.setFile(uri);
+                return range;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /**
+         * @param symbol
+         * @return true if we should keep index for a given symbol's kind
+         */
+        private boolean shouldIndex(Symbol symbol) {
+            ElementKind kind = symbol.getKind();
+
+            switch (kind) {
+                case ENUM:
+                case ANNOTATION_TYPE:
+                case INTERFACE:
+                case ENUM_CONSTANT:
+                case FIELD:
+                case METHOD:
+                case PARAMETER:
+                case EXCEPTION_PARAMETER:
+                case LOCAL_VARIABLE:
+                case TYPE_PARAMETER:
+                    return true;
+                case CLASS:
+                    return !symbol.isAnonymous();
+                case CONSTRUCTOR:
+                    // TODO also skip generated constructors
+                    return !symbol.getEnclosingElement().isAnonymous();
+                default:
+                    return false;
+            }
+        }
+
+        private boolean isExported(Symbol symbol) {
+            ElementKind kind = symbol.getKind();
+
+            switch (kind) {
+                case PARAMETER:
+                case EXCEPTION_PARAMETER:
+                case LOCAL_VARIABLE:
+                case TYPE_PARAMETER:
+                    return false;
+                default:
+                    return true;
+            }
+        }
+
+        private int offset(JCTree.JCCompilationUnit compilationUnit,
+                           Symbol symbol,
+                           int estimate) throws IOException {
+            CharSequence content = compilationUnit.sourcefile.getCharContent(false);
+            Name name = symbol.getSimpleName();
+
+            estimate = indexOf(content, name, estimate);
+            return estimate;
+        }
+
+        /**
+         * Adapted from java.util.String.
+         * <p>
+         * The source is the character array being searched, and the target
+         * is the string being searched for.
+         *
+         * @param source    the characters being searched.
+         * @param target    the characters being searched for.
+         * @param fromIndex the index to begin searching from.
+         */
+        private int indexOf(CharSequence source, CharSequence target, int fromIndex) {
+            int sourceOffset = 0, sourceCount = source.length(), targetOffset = 0, targetCount = target.length();
+
+            if (fromIndex >= sourceCount) {
+                return (targetCount == 0 ? sourceCount : -1);
+            }
+            if (fromIndex < 0) {
+                fromIndex = 0;
+            }
+            if (targetCount == 0) {
+                return fromIndex;
+            }
+
+            char first = target.charAt(targetOffset);
+            int max = sourceOffset + (sourceCount - targetCount);
+
+            for (int i = sourceOffset + fromIndex; i <= max; i++) {
+            /* Look for first character. */
+                if (source.charAt(i) != first) {
+                    while (++i <= max && source.charAt(i) != first) ;
+                }
+
+            /* Found first character, now look at the rest of v2 */
+                if (i <= max) {
+                    int j = i + 1;
+                    int end = j + targetCount - 1;
+                    for (int k = targetOffset + 1; j < end && source.charAt(j) == target.charAt(k); j++, k++) ;
+
+                    if (j == end) {
+                    /* Found whole string. */
+                        return i - sourceOffset;
+                    }
+                }
+            }
+            return -1;
+        }
+
+        /**
+         * @param tree        compilation unit
+         * @param foundTree   found AST node
+         * @param foundSymbol found symbol
+         * @return hover content for specific symbol
+         */
+        private String getTitle(JCTree.JCCompilationUnit tree,
+                               JCTree foundTree,
+                               Symbol foundSymbol) {
+
+            switch (foundSymbol.getKind()) {
+                case PACKAGE:
+                    return "package " + foundSymbol.getQualifiedName();
+                case ENUM:
+                    return "enum " + foundSymbol.getQualifiedName();
+                case CLASS:
+                    return "class " + foundSymbol.getQualifiedName();
+                case ANNOTATION_TYPE:
+                    return "@interface " + foundSymbol.getQualifiedName();
+                case INTERFACE:
+                    return "interface " + foundSymbol.getQualifiedName();
+                case METHOD:
+                case CONSTRUCTOR:
+                case STATIC_INIT:
+                case INSTANCE_INIT:
+                    Symbol.MethodSymbol method = (Symbol.MethodSymbol) foundSymbol;
+                    String signature = ShortTypePrinter.methodSignature(method);
+                    String returnType = ShortTypePrinter.print(method.getReturnType());
+
+                    return returnType + " " + signature;
+                case PARAMETER:
+                case LOCAL_VARIABLE:
+                case EXCEPTION_PARAMETER:
+                case ENUM_CONSTANT:
+                case FIELD:
+                    return ShortTypePrinter.print(foundSymbol.type);
+                case TYPE_PARAMETER:
+                case OTHER:
+                case RESOURCE_VARIABLE:
+                    return StringUtils.EMPTY;
+            }
+
+            return StringUtils.EMPTY;
+        }
+
     }
 
 }

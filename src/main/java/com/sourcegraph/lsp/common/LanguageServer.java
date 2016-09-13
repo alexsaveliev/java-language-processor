@@ -127,7 +127,7 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
             public CompletableFuture<List<? extends Location>> definition(TextDocumentPositionParams params) {
                 Position pos = getPosition(params);
                 try {
-                    Range range = symbolService.definition(workspace.toPath(), pos);
+                    Range range = symbolService.definition(workspace.toPath(), pos).getRange();
                     LocationImpl ret = new LocationImpl();
                     ret.setUri(range.getFile());
                     RangeImpl r = new RangeImpl();

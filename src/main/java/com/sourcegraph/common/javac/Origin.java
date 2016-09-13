@@ -38,8 +38,8 @@ class Origin {
 
     private static Map<Pattern, String> overrides;
 
-    private static Map<URI, Entry> cache = new HashMap<>();
-    private static Map<String, Entry> depsCache = new HashMap<>();
+    private static Map<URI, OriginEntry> cache = new HashMap<>();
+    private static Map<String, OriginEntry> depsCache = new HashMap<>();
 
     static {
         overrides = new HashMap<>();
@@ -57,18 +57,18 @@ class Origin {
         }
     }
 
-    static String getRepository(JavaFileObject origin, JavacConfig javacConfig) {
+    static OriginEntry getRepository(JavaFileObject origin, JavacConfig javacConfig) {
         URI normalizedOrigin = normalizeOrigin(origin.toUri());
-        Entry cached = cache.get(normalizedOrigin);
+        OriginEntry cached = cache.get(normalizedOrigin);
         if (cached != null) {
-            return cached.uri;
+            return cached;
         }
         Path jarFile;
         try {
             jarFile = getOriginJARFilePath(normalizedOrigin);
         } catch (URISyntaxException e) {
             LOGGER.warn("Error getting origin file path for origin: {}", normalizedOrigin, e);
-            cache.put(normalizedOrigin, new Entry());
+            cache.put(normalizedOrigin, new OriginEntry(null, null));
             return null;
         }
 
@@ -77,26 +77,25 @@ class Origin {
             return null;
         }
 
-        String special = processSpecialJar(origin.toUri(), jarFile, javacConfig);
+        OriginEntry special = processSpecialJar(origin.toUri(), jarFile, javacConfig);
         if (special != null) {
             return special;
         }
 
         Dependency dependency = javacConfig.getDependencyForJar(jarFile);
         if (dependency == null) {
-            String resolved;
+            OriginEntry resolved;
             if (javacConfig.android) {
                 resolved = tryResolveExplodedAar(normalizedOrigin, javacConfig);
             } else {
-                resolved = null;
+                resolved = new OriginEntry(null, null);
             }
-            cache.put(normalizedOrigin, new Entry(resolved));
+            cache.put(normalizedOrigin, resolved);
             return resolved;
         }
 
-        String scm = getScmUriForDependency(dependency);
-        cache.put(normalizedOrigin, new Entry(scm));
-
+        OriginEntry scm = getScmUriForDependency(dependency);
+        cache.put(normalizedOrigin, scm);
         return scm;
     }
 
@@ -157,22 +156,22 @@ class Origin {
      * @param javacConfig javac config to use
      * @return resolved target if jar file matches known one
      */
-    private static String processSpecialJar(URI origin, Path jarFile, JavacConfig javacConfig) {
+    private static OriginEntry processSpecialJar(URI origin, Path jarFile, JavacConfig javacConfig) {
         String jarName = jarFile.getFileName().toString();
         if (isJDK(jarFile)) {
             if (javacConfig.android) {
                 return AndroidOrigin.resolve(origin, true);
             }
-            String ret = JDK_REPO;
-            cache.put(origin, new Entry(ret));
+            OriginEntry ret = new OriginEntry(JDK_REPO, "jdk");
+            cache.put(origin, ret);
             return ret;
         } else if (jarName.equals("tools.jar")) {
-            String ret = TOOLS_JAR_REPO;
-            cache.put(origin, new Entry(ret));
+            OriginEntry ret = new OriginEntry(TOOLS_JAR_REPO, "langtools");
+            cache.put(origin, ret);
             return ret;
         } else if (jarName.equals("nashorn.jar")) {
-            String ret = NASHORN_REPO;
-            cache.put(origin, new Entry(ret));
+            OriginEntry ret = new OriginEntry(NASHORN_REPO, "nashorn");
+            cache.put(origin, ret);
             return ret;
         } else if (jarName.equals("android.jar")) {
             return AndroidOrigin.resolve(origin, true);
@@ -198,7 +197,7 @@ class Origin {
      * @param config config to use
      * @return resolved target if origin matches exploded AAR pattern
      */
-    private static String tryResolveExplodedAar(URI origin, JavacConfig config) {
+    private static OriginEntry tryResolveExplodedAar(URI origin, JavacConfig config) {
         String uri = origin.toString();
         int pos = uri.indexOf("/exploded-aar/");
         if (pos < 0) {
@@ -224,20 +223,21 @@ class Origin {
      * Try to resolveOrigin this raw Dependency to its VCS target.
      * @return SCM URI
      */
-    private static String getScmUriForDependency(Dependency dependency) {
+    private static OriginEntry getScmUriForDependency(Dependency dependency) {
 
         String groupId = dependency.groupID;
         String key = groupId + ':' + dependency.artifactID + ':' + dependency.version;
-        Entry cached = depsCache.get(key);
+        OriginEntry cached = depsCache.get(key);
         if (cached != null) {
-            return cached.uri;
+            return cached;
         }
 
         String scm = getOverride(groupId + '/' + dependency.artifactID);
         // We may know repo URI already
         if (scm != null) {
-            depsCache.put(key, new Entry(scm));
-            return scm;
+            OriginEntry ret = new OriginEntry(scm, groupId + '/' + dependency.artifactID);
+            depsCache.put(key, ret);
+            return ret;
         }
 
         try {
@@ -245,8 +245,9 @@ class Origin {
         } catch (IOException | XmlPullParserException e) {
             scm = null;
         }
-        depsCache.put(key, new Entry(scm));
-        return scm;
+        OriginEntry ret = new OriginEntry(scm, dependency.groupID + '/' + dependency.artifactID);
+        depsCache.put(key, ret);
+        return ret;
    }
 
     /**
@@ -315,17 +316,6 @@ class Origin {
         Model model = xpp3Reader.read(input);
         input.close();
         return model;
-    }
-
-    private static class Entry {
-        String uri;
-
-        Entry() {
-        }
-
-        Entry(String uri) {
-            this.uri = uri;
-        }
     }
 
 }

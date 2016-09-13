@@ -1,12 +1,7 @@
 package com.sourcegraph.common.javac;
 
 import com.sourcegraph.common.config.builder.ScanUtil;
-import com.sourcegraph.common.model.DefSpec;
 import com.sourcegraph.common.model.JavacConfig;
-import com.sourcegraph.common.model.Position;
-import com.sourcegraph.common.model.Symbol;
-import com.sourcegraph.common.service.NoDefinitionFoundException;
-import com.sourcegraph.common.service.SymbolException;
 import com.sourcegraph.common.service.WorkspaceBeingPreparedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,109 +20,51 @@ public class Workspace {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Workspace.class);
 
-
     private Path root;
-
-    /**
-     * source file -> index mapping
-     */
-    private Map<Path, Future<SymbolIndex>> indexCache = new ConcurrentHashMap<>();
 
     /**
      * config file -> config mapping
      */
     private Map<Path, JavacConfig> configCache = new ConcurrentHashMap<>();
 
-    /**
-     * All the external defs used in workspace
-     */
-    private Collection<DefSpec> externalDefs = ConcurrentHashMap.newKeySet();
-
-    private ExecutorService executorService;
-
-    Workspace(Path root, ExecutorService executorService) {
+    Workspace(Path root) {
         this.root = root;
-        this.executorService = executorService;
     }
 
     /**
      * @param path source file path
-     * @return index associated that includes given path
+     * @return index that contains symbols defined/used in the given source file
      */
-    public Future<SymbolIndex> findIndex(Path path) throws WorkspaceBeingPreparedException {
+    public SymbolIndex findIndex(Path path) throws WorkspaceBeingPreparedException {
         Path dir = path.getParent();
         JavacConfig config = findConfig(dir);
         if (config == null) {
             throw new WorkspaceBeingPreparedException();
         }
-        return indexCache.computeIfAbsent(config.getFile(),
-                configFile -> new SymbolIndex(config, root, this, executorService).index());
-    }
-
-    /**
-     * @param dir directory to search in
-     * @return configuration for specific directory (or any parent)
-     */
-    private JavacConfig findConfig(Path dir) {
-        return configCache.computeIfAbsent(dir, this::doFindConfig);
-    }
-
-    /**
-     * Searches for configuration in the given directory, climbs up until workspace root is reached
-     * @param dir directory to search in
-     * @return configuration object to be used for specific directory
-     */
-    private JavacConfig doFindConfig(Path dir) {
-        while (true) {
-            JavacConfig found = JavacConfig.read(dir);
-            if (found != null) {
-                return found;
-            } else if (root.startsWith(dir)) {
-                return null;
-            } else
-                dir = dir.getParent();
-        }
-    }
-
-    /**
-     * @return all the external defs
-     */
-    public Collection<DefSpec> getExternalDefs() {
-        return externalDefs;
-    }
-
-    /**
-     * @return all the exported symbols
-     */
-    public Collection<Symbol> getExportedSymbols() {
-        Collection<Symbol> ret = new LinkedList<>();
-        for (Future<SymbolIndex> futureIndex : indexCache.values()) {
-            try {
-                SymbolIndex index = futureIndex.get();
-                ret.addAll(index.definitions());
-            } catch (InterruptedException | ExecutionException e) {
-                LOGGER.error("An error occurred while computing index", e);
-            }
-        }
-        return ret;
+        return new SymbolIndex(config, root);
     }
 
     /**
      * Ensures that all indexes are computed, blocks execution
+     *
      * @throws IOException
      */
-    public void computeIndexes() throws IOException, WorkspaceBeingPreparedException {
-        Collection<Path> configs = ScanUtil.findMatchingFiles(root, JavacConfig.CONFIG_FILE_NAME);
+    public void computeIndexes(ExecutorService executorService) throws IOException, WorkspaceBeingPreparedException {
+        Collection<SymbolIndex> indexes = getIndexes();
+
         BlockingQueue<Future<SymbolIndex>> queue = new LinkedBlockingQueue<>();
-        for (Path config : configs) {
-            try {
-                queue.put(findIndex(config));
-            } catch (InterruptedException e) {
-                LOGGER.error("Interrupted while computing indexes", e);
+        CompletionService<SymbolIndex> completionService = new ExecutorCompletionService<>(executorService, queue);
+
+        for (SymbolIndex index : indexes) {
+            if (index.isBeingIndexed()) {
+                queue.add(index.getIndexTask());
             }
+            if (index.isIndexed()) {
+                continue;
+            }
+            executorService.submit(() -> index.index(executorService).get());
+
         }
-        CompletionService<SymbolIndex> completionService =
-                new ExecutorCompletionService<>(executorService, queue);
         int total = queue.size();
         boolean errors = false;
         while (total > 0 && !errors) {
@@ -142,26 +79,43 @@ public class Workspace {
     }
 
     /**
-     * @return position of symbol defined by the given spec
+     * @return all indexes in given workspace
+     * @throws IOException                     if there was an I/O error while searching for index files
+     * @throws WorkspaceBeingPreparedException if workspace is not configured (yet)
      */
-    public Position defSpecToPosition(DefSpec defSpec)
-            throws WorkspaceBeingPreparedException, SymbolException, NoDefinitionFoundException {
-        for (Future<SymbolIndex> futureIndex : indexCache.values()) {
-            if (!futureIndex.isDone()) {
-                throw new WorkspaceBeingPreparedException();
-            }
-            try {
-                SymbolIndex index = futureIndex.get();
-                Position pos = index.defSpecToPosition(defSpec);
-                if (pos != null) {
-                    return pos;
-                }
-            } catch (InterruptedException | ExecutionException e) {
-                LOGGER.error("An error occurred while computing index", e);
-                throw new SymbolException("Failed to compute index");
-            }
+    public Collection<SymbolIndex> getIndexes() throws IOException, WorkspaceBeingPreparedException {
+        Collection<Path> configs = ScanUtil.findMatchingFiles(root, JavacConfig.CONFIG_FILE_NAME);
+        Collection<SymbolIndex> indexes = new LinkedList<>();
+        for (Path p : configs) {
+            indexes.add(findIndex(p));
         }
-        throw new NoDefinitionFoundException();
+        return indexes;
+    }
+
+    /**
+     * @param dir directory to search in
+     * @return configuration for specific directory (or any parent)
+     */
+    private JavacConfig findConfig(Path dir) {
+        return configCache.computeIfAbsent(dir, this::doFindConfig);
+    }
+
+    /**
+     * Searches for configuration in the given directory, climbs up until workspace root is reached
+     *
+     * @param dir directory to search in
+     * @return configuration object to be used for specific directory
+     */
+    private JavacConfig doFindConfig(Path dir) {
+        while (true) {
+            JavacConfig found = JavacConfig.read(dir);
+            if (found != null) {
+                return found;
+            } else if (root.startsWith(dir)) {
+                return null;
+            } else
+                dir = dir.getParent();
+        }
     }
 
 }

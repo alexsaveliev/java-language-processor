@@ -1,0 +1,10 @@
+apply plugin: 'java'
+
+dependencies {
+    compile project(':common')
+
+    compile 'io.typefox.lsapi:io.typefox.lsapi:0.3.0-SNAPSHOT'
+    compile 'io.typefox.lsapi:io.typefox.lsapi.services:0.3.0-SNAPSHOT'
+    compile 'io.typefox.lsapi:io.typefox.lsapi.annotations:0.3.0-SNAPSHOT'
+
+}

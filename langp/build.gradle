@@ -1,0 +1,12 @@
+apply plugin: 'java'
+apply plugin: 'spring-boot'
+
+jar.baseName = 'java-langp'
+
+springBoot {
+    mainClass = 'com.sourcegraph.langp.Application'
+}
+
+dependencies {
+    compile project(':common')
+}

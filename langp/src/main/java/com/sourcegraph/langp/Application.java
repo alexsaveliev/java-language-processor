@@ -1,20 +1,14 @@
-package com.sourcegraph.lsp.single;
+package com.sourcegraph.langp;
 
-import com.sourcegraph.lsp.single.service.Server;
+import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.filter.CommonsRequestLoggingFilter;
 
-/**
- * This Spring Boot application connects to remote [address]:port and handles incoming
- * LSP requests while communication channel is alive
- */
 @SpringBootApplication(scanBasePackages = {
         "com.sourcegraph.common",
-        "com.sourcegraph.lsp.common",
-        "com.sourcegraph.lsp.single"})
+        "com.sourcegraph.langp"})
 @EnableCaching
 public class Application {
 
@@ -27,11 +21,7 @@ public class Application {
         return crlf;
     }
 
-    public static void main(String[] args) throws Exception {
-        Server server = new SpringApplicationBuilder(com.sourcegraph.lsp.multi.Application.class).
-                web(false).
-                run(args).
-                getBean(Server.class);
-        server.open();
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
     }
 }

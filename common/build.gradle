@@ -1,0 +1,25 @@
+apply plugin: 'java'
+
+dependencies {
+
+    compile('org.springframework.boot:spring-boot-starter-web:1.4.0.RELEASE')
+    testCompile('org.springframework.boot:spring-boot-starter-test:1.4.0.RELEASE')
+
+    compile 'org.apache.commons:commons-lang3:3.3.2'
+    compile 'commons-io:commons-io:2.4'
+
+    compile 'org.apache.maven:maven-core:3.3.9'
+    compile 'org.apache.maven:maven-model:3.3.9'
+    compile 'org.eclipse.aether:aether-transport-file:1.1.0'
+    compile 'org.eclipse.aether:aether-transport-http:1.1.0'
+    compile 'org.eclipse.aether:aether-connector-basic:1.1.0'
+
+    compile 'org.eclipse.jgit:org.eclipse.jgit:4.4.1.201607150455-r'
+
+    compile 'org.ehcache:ehcache:3.1.1'
+
+    compile 'org.apache.commons:commons-csv:1.4'
+
+    compileOnly files("${System.properties['java.home']}/../lib/tools.jar")
+
+}

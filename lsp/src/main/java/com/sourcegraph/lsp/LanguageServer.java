@@ -1,4 +1,4 @@
-package com.sourcegraph.lsp.common;
+package com.sourcegraph.lsp;
 
 import com.sourcegraph.common.model.Position;
 import com.sourcegraph.common.model.Range;

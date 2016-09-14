@@ -1,4 +1,11 @@
 apply plugin: 'java'
+apply plugin: 'spring-boot'
+
+jar.baseName = 'java-lsp-multi'
+
+springBoot {
+    mainClass = 'com.sourcegraph.lsp.Application'
+}
 
 dependencies {
     compile project(':common')

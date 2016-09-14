@@ -1,5 +1,3 @@
 include ':common'
 include ':langp'
-include ':lsp-common'
-include ':lsp-multi'
-include ':lsp-single'
+include ':lsp'

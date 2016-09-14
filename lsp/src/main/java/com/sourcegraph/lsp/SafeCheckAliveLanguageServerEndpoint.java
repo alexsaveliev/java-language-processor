@@ -1,4 +1,4 @@
-package com.sourcegraph.lsp.common;
+package com.sourcegraph.lsp;
 
 import io.typefox.lsapi.services.transport.server.LanguageServerEndpoint;
 import org.apache.commons.lang3.SystemUtils;

@@ -1,7 +1,7 @@
-package com.sourcegraph.lsp.multi.service;
+package com.sourcegraph.lsp.service;
 
-import com.sourcegraph.lsp.common.LanguageServer;
-import com.sourcegraph.lsp.common.SafeCheckAliveLanguageServerEndpoint;
+import com.sourcegraph.lsp.LanguageServer;
+import com.sourcegraph.lsp.SafeCheckAliveLanguageServerEndpoint;
 import io.typefox.lsapi.services.json.MessageJsonHandler;
 import io.typefox.lsapi.services.json.StreamMessageReader;
 import io.typefox.lsapi.services.json.StreamMessageWriter;

@@ -1,7 +1,7 @@
 apply plugin: 'java'
 apply plugin: 'spring-boot'
 
-jar.baseName = 'java-lsp-multi'
+jar.baseName = 'java-lsp'
 
 springBoot {
     mainClass = 'com.sourcegraph.lsp.Application'

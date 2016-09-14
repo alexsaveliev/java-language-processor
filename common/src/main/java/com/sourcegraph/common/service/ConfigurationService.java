@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
@@ -19,6 +20,11 @@ import java.util.concurrent.Future;
 public class ConfigurationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigurationService.class);
+
+    /**
+     * File that indicates completion of configuration process
+     */
+    private static final String STAMP_FILE = ".sourcegraph";
 
     @Autowired
     private TaskExecutorConfiguration taskExecutorConfiguration;
@@ -46,11 +52,20 @@ public class ConfigurationService {
             } catch (Exception ex) {
                 LOGGER.warn("Unable to configure {}", workspace, ex);
             }
+            new FileOutputStream(new File(workspace, STAMP_FILE)).close();
             LOGGER.info("Configured {}", workspace);
             return workspace;
         });
         jobs.put(workspace, ret);
         return ret;
+    }
+
+    /**
+     * @param workspace workspace root
+     * @return true if workspace is already configured
+     */
+    public boolean isConfigured(File workspace) {
+        return new File(workspace, STAMP_FILE).exists();
     }
 
     public void purge() throws Exception {

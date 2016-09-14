@@ -57,7 +57,11 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
         try {
             File root = new File(this.root, params.getRootPath());
-            workspace = configurationService.configure(root).get();
+            if (configurationService.isConfigured(root)) {
+                workspace = root;
+            } else {
+                workspace = configurationService.configure(root).get();
+            }
         } catch (InterruptedException | ExecutionException e) {
             LOGGER.error("Unable to initialize workspace {}", params.getRootPath());
         }

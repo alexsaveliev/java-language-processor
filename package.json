@@ -1,0 +1,32 @@
+{
+    "name": "lsp-java",
+    "version": "0.0.1",
+    "publisher": "Alex Saveliev",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/alexsaveliev/java-language-processor.git"
+    },
+    "engines": {
+        "vscode": "^0.10.10"
+    },
+    "activationEvents": [
+        "onLanguage:java"
+    ],
+    "files": [
+    	"vscode/main.ts"
+    ],
+    "main": "./build/js/vscode/main",
+    "preview": "true",
+    "scripts": {
+        "vscode:prepublish": "node ./node_modules/vscode/bin/compile",
+        "compile": "node ./node_modules/vscode/bin/compile -watch -p ./",
+        "postinstall": "node ./node_modules/vscode/bin/install"
+    },
+    "dependencies": {
+        "vscode-languageclient": "2.2.1"
+    },
+    "devDependencies": {
+        "typescript": "^1.8.5",
+        "vscode": "^0.11.0"
+    }
+}

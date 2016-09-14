@@ -4,19 +4,23 @@ import com.sourcegraph.common.model.Position;
 import com.sourcegraph.common.model.Range;
 import com.sourcegraph.common.model.RefLocations;
 import com.sourcegraph.common.service.*;
+import com.sourcegraph.common.util.PathUtil;
 import io.typefox.lsapi.*;
 import io.typefox.lsapi.impl.*;
 import io.typefox.lsapi.services.TextDocumentService;
 import io.typefox.lsapi.services.WindowService;
 import io.typefox.lsapi.services.WorkspaceService;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.SystemUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -32,12 +36,6 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LanguageServer.class);
 
-    /**
-     * Root directory where all repositories are located
-     */
-    @Value("${workspace:${SGPATH:${user.home}/.sourcegraph}/workspace/java}")
-    private String root;
-
     @Autowired
     private ConfigurationService configurationService;
 
@@ -51,24 +49,21 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
         LOGGER.info("Initialize {}", params.getRootPath());
 
-        if (params.getRootPath() == null) {
-            throw new IllegalArgumentException("Missing root path");
-        }
-
-        try {
-            File root = new File(this.root, params.getRootPath());
-            if (configurationService.isConfigured(root)) {
-                workspace = root;
-            } else {
-                workspace = configurationService.configure(root).get();
+        if (params.getRootPath() != null) {
+            try {
+                File root = new File(params.getRootPath());
+                if (configurationService.isConfigured(root)) {
+                    workspace = root;
+                } else {
+                    workspace = configurationService.configure(root).get();
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                LOGGER.error("Unable to initialize workspace {}", params.getRootPath());
             }
-        } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("Unable to initialize workspace {}", params.getRootPath());
         }
 
         InitializeResultImpl result = new InitializeResultImpl();
         ServerCapabilitiesImpl c = new ServerCapabilitiesImpl();
-        c.setTextDocumentSync(TextDocumentSyncKind.None);
         c.setHoverProvider(true);
         c.setDefinitionProvider(true);
         c.setReferencesProvider(true);
@@ -106,8 +101,8 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
             @Override
             public CompletableFuture<Hover> hover(TextDocumentPositionParams params) {
 
-                Position pos = getPosition(params);
                 try {
+                    Position pos = getPosition(params);
                     com.sourcegraph.common.model.Hover hover = symbolService.hover(workspace.toPath(), pos);
                     HoverImpl ret = new HoverImpl();
                     List<MarkedStringImpl> contents = new LinkedList<>();
@@ -117,7 +112,7 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
                     }
                     ret.setContents(contents);
                     return CompletableFuture.completedFuture(ret);
-                } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException e) {
+                } catch (NoDefinitionFoundException | SymbolException | WorkspaceBeingPreparedException | URISyntaxException e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -129,28 +124,28 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
             @Override
             public CompletableFuture<List<? extends Location>> definition(TextDocumentPositionParams params) {
-                Position pos = getPosition(params);
                 try {
+                    Position pos = getPosition(params);
                     Range range = symbolService.definition(workspace.toPath(), pos).getRange();
                     LocationImpl ret = new LocationImpl();
-                    ret.setUri(range.getFile());
+                    ret.setUri(toUri(range.getFile()));
                     RangeImpl r = new RangeImpl();
-                    r.setStart(new PositionImpl(range.getStartLine() + 1, range.getStartCharacter() + 1));
-                    r.setEnd(new PositionImpl(range.getEndLine() + 1, range.getEndCharacter() + 1));
+                    r.setStart(new PositionImpl(range.getStartLine(), range.getStartCharacter()));
+                    r.setEnd(new PositionImpl(range.getEndLine(), range.getEndCharacter()));
                     ret.setRange(r);
                     return CompletableFuture.completedFuture(Collections.singletonList(ret));
-                } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException e) {
+                } catch (SymbolException | NoDefinitionFoundException | WorkspaceBeingPreparedException | URISyntaxException e) {
                     throw new RuntimeException(e);
                 }
             }
 
             @Override
             public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
-                Position pos = getPosition(params);
                 RefLocations ret;
                 try {
-                    ret = symbolService.localRefs(pos);
-                } catch (WorkspaceException | SymbolException | NoDefinitionFoundException e) {
+                    Position pos = getPosition(params);
+                    ret = symbolService.localRefs(workspace.toPath(), pos);
+                } catch (SymbolException | NoDefinitionFoundException | URISyntaxException e) {
                     throw new RuntimeException(e);
                 }
 
@@ -231,20 +226,37 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
             }
 
-            private Position getPosition(TextDocumentPositionParams params) {
+            /**
+             * @param params LSP text document position parameters
+             * @return parameters converted to internal structure
+             */
+            private Position getPosition(TextDocumentPositionParams params) throws URISyntaxException {
                 Position pos = new Position();
-                pos.setFile(params.getTextDocument().getUri());
-                pos.setLine(params.getPosition().getLine() - 1);
-                pos.setCharacter(params.getPosition().getCharacter() - 1);
+                String uri = params.getTextDocument().getUri();
+                URI u = new URI(uri);
+                if (u.isAbsolute()) {
+                    if (!"file".equals(u.getScheme())) {
+                        throw new RuntimeException(uri + " scheme is not supported");
+                    }
+                    if (u.getHost() != null) {
+                        throw new RuntimeException(uri + " with not-empty host is not supported");
+                    }
+                    Path file = new File(u.getPath()).toPath().toAbsolutePath();
+                    pos.setFile(PathUtil.normalize(workspace.toPath().relativize(file).toString()));
+                } else {
+                    pos.setFile(params.getTextDocument().getUri());
+                }
+                pos.setLine(params.getPosition().getLine());
+                pos.setCharacter(params.getPosition().getCharacter());
                 return pos;
             }
 
             private Location getLocation(Range range) {
                 LocationImpl ret = new LocationImpl();
-                ret.setUri(range.getFile());
+                ret.setUri(toUri(range.getFile()));
                 RangeImpl r = new RangeImpl();
-                r.setStart(new PositionImpl(range.getStartLine() + 1, range.getStartCharacter() + 1));
-                r.setEnd(new PositionImpl(range.getEndLine() + 1, range.getEndCharacter() + 1));
+                r.setStart(new PositionImpl(range.getStartLine(), range.getStartCharacter()));
+                r.setEnd(new PositionImpl(range.getEndLine(), range.getEndCharacter()));
                 ret.setRange(r);
                 return ret;
             }
@@ -291,5 +303,15 @@ public class LanguageServer implements io.typefox.lsapi.services.LanguageServer 
 
             }
         };
+    }
+
+    private String toUri(String file) {
+        StringBuilder ret = new StringBuilder();
+        ret.append("file://");
+        if (SystemUtils.IS_OS_WINDOWS) {
+            ret.append('/');
+        }
+        ret.append(PathUtil.normalize(new File(workspace, file).getAbsolutePath()));
+        return ret.toString();
     }
 }

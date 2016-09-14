@@ -1,20 +1,18 @@
 package com.sourcegraph.lsp.multi.service;
 
 import com.sourcegraph.lsp.common.LanguageServer;
+import com.sourcegraph.lsp.common.SafeCheckAliveLanguageServerEndpoint;
 import io.typefox.lsapi.services.json.MessageJsonHandler;
 import io.typefox.lsapi.services.json.StreamMessageReader;
 import io.typefox.lsapi.services.json.StreamMessageWriter;
 import io.typefox.lsapi.services.transport.io.ConcurrentMessageReader;
-import io.typefox.lsapi.services.transport.server.LanguageServerEndpoint;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,7 +22,6 @@ import java.net.SocketAddress;
 import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.channels.Channels;
-import java.nio.channels.CompletionHandler;
 import java.util.concurrent.*;
 
 /**
@@ -71,7 +68,7 @@ public class Server {
         LOGGER.info("LSP server is listening on {}:{}", this.address, this.port);
 
         while (true) {
-            AsynchronousSocketChannel channel = null;
+            AsynchronousSocketChannel channel;
             try {
                 channel = socket.accept().get();
             } catch (InterruptedException | ExecutionException e) {
@@ -93,7 +90,7 @@ public class Server {
             OutputStream out = Channels.newOutputStream(channel);
             StreamMessageWriter writer = new StreamMessageWriter(out, jsonHandler);
 
-            new LanguageServerEndpoint(languageServer, executorService).connect(concurrentReader, writer);
+            new SafeCheckAliveLanguageServerEndpoint(languageServer, executorService).connect(concurrentReader, writer);
             concurrentReader.join();
             try {
                 channel.close();

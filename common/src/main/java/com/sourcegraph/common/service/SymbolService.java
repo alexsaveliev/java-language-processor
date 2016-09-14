@@ -20,7 +20,6 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.concurrent.ExecutionException;
 
 /**
  * Provides foundSymbol resolution methods
@@ -35,9 +34,6 @@ public class SymbolService {
      */
     @Value("${workspace.get.timeout:250}")
     private long timeout;
-
-    @Autowired
-    private RepositoryService repositoryService;
 
     @Autowired
     private WorkspaceService workspaceService;
@@ -95,7 +91,7 @@ public class SymbolService {
      * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
      */
     public com.sourcegraph.common.model.Symbol definition(Path root,
-                             Position position) throws
+                                                          Position position) throws
             SymbolException,
             NoDefinitionFoundException,
             WorkspaceBeingPreparedException {
@@ -126,32 +122,21 @@ public class SymbolService {
     }
 
     /**
-     * @param position foundSymbol position
-     * @return local references to specific foundSymbol
-     * @throws WorkspaceException         if there was error configuring workspace
-     * @throws SymbolException            if no foundSymbol is found
-     * @throws NoDefinitionFoundException if there is no foundSymbol at specific position
+     * @param position symbol's position
+     * @return local references to specific symbol
+     * @throws SymbolException            if no symbol is found
+     * @throws NoDefinitionFoundException if there is no symbol at specific position
      */
-    public RefLocations localRefs(Position position) throws
-            WorkspaceException,
+    public RefLocations localRefs(Path root,
+                                  Position position) throws
             SymbolException,
             NoDefinitionFoundException {
 
-        LOGGER.info("Local refs {}:{}/{} {}:{}",
-                position.getRepo(),
-                position.getCommit(),
+        LOGGER.info("Local refs {} {}:{}",
                 position.getFile(),
                 position.getLine(),
                 position.getCharacter());
 
-        Path root;
-        try {
-            root = repositoryService.getRepository(position.getRepo(), position.getCommit()).get().toPath();
-        } catch (InterruptedException | ExecutionException e) {
-            LOGGER.error("An error occurred while fetching repository {}@{}",
-                    position.getRepo(), position.getCommit(), e);
-            throw new WorkspaceException(e);
-        }
         Workspace workspace = workspaceService.getWorkspace(root);
         Path sourceFile = root.resolve(position.getFile());
 
@@ -189,9 +174,7 @@ public class SymbolService {
         } catch (NoDefinitionFoundException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.error("An error occurred while looking for local refs {}:{}/{} {}:{}",
-                    position.getRepo(),
-                    position.getCommit(),
+            LOGGER.error("An error occurred while looking for local refs {} {}:{}",
                     position.getFile(),
                     position.getLine(),
                     position.getCharacter(),
@@ -201,25 +184,16 @@ public class SymbolService {
     }
 
     /**
-     * @param repoRev repository and revision
+     * @param root workpace root
      * @return all external references from given repository
-     * @throws WorkspaceException if there was error configuring workspace
-     * @throws SymbolException    if no foundSymbol is found
+     * @throws SymbolException if no foundSymbol is found
      */
-    public ExternalRefs externalRefs(RepoRev repoRev)
+    public ExternalRefs externalRefs(Path root)
             throws WorkspaceException,
             SymbolException {
 
-        LOGGER.info("External refs {}:{}",
-                repoRev.getRepo(),
-                repoRev.getCommit());
-
-        Path root;
-        try {
-            root = repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit()).get().toPath();
-        } catch (InterruptedException | ExecutionException e) {
-            throw new WorkspaceException(e);
-        }
+        LOGGER.info("External refs in {}",
+                root);
 
         try {
             Workspace workspace = workspaceService.getWorkspace(root);
@@ -247,34 +221,24 @@ public class SymbolService {
             ret.setDefs(defSpecs);
             return ret;
         } catch (Exception e) {
-            LOGGER.error("An error occurred while looking for external refs {}:{}",
-                    repoRev.getRepo(),
-                    repoRev.getCommit(),
+            LOGGER.error("An error occurred while looking for external refs in {}",
+                    root,
                     e);
             throw new SymbolException(e.getMessage());
         }
     }
 
     /**
-     * @param repoRev repository and revision
+     * @param root repository root
      * @return all exported symbols from given repository
-     * @throws WorkspaceException if there was error configuring workspace
-     * @throws SymbolException    if no foundSymbol is found
+     * @throws SymbolException if no symbol is found
      */
-    public ExportedSymbols exportedSymbols(RepoRev repoRev)
+    public ExportedSymbols exportedSymbols(Path root)
             throws WorkspaceException,
             SymbolException {
 
-        LOGGER.info("Exported symbols {}:{}",
-                repoRev.getRepo(),
-                repoRev.getCommit());
-
-        Path root;
-        try {
-            root = repositoryService.getRepository(repoRev.getRepo(), repoRev.getCommit()).get().toPath();
-        } catch (InterruptedException | ExecutionException e) {
-            throw new WorkspaceException(e);
-        }
+        LOGGER.info("Exported symbols in {}",
+                root);
 
         try {
             Workspace workspace = workspaceService.getWorkspace(root);
@@ -288,8 +252,6 @@ public class SymbolService {
                         "true".equals(record.get(12)))) {
                     for (CSVRecord r : resultSet) {
                         com.sourcegraph.common.model.Symbol s = SymbolIndex.toSymbol(r);
-                        s.setRepo(repoRev.getRepo());
-                        s.setCommit(repoRev.getCommit());
                         symbols.add(s);
                     }
                 }
@@ -297,9 +259,8 @@ public class SymbolService {
             ret.setSymbols(symbols);
             return ret;
         } catch (Exception e) {
-            LOGGER.error("An error occurred while looking for exported symbols {}:{}",
-                    repoRev.getRepo(),
-                    repoRev.getCommit(),
+            LOGGER.error("An error occurred while looking for exported symbols in {}",
+                    root,
                     e);
             throw new SymbolException(e.getMessage());
         }

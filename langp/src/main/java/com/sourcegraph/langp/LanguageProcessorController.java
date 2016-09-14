@@ -64,10 +64,12 @@ public class LanguageProcessorController {
 
     @PostMapping(value = "/local-refs")
     public RefLocations localRefs(@Valid @RequestBody Position pos)
-            throws WorkspaceException,
+            throws WorkspaceBeingPreparedException,
+            WorkspaceException,
             SymbolException,
             NoDefinitionFoundException {
-        RefLocations ret = symbolService.localRefs(pos);
+        Path root = repositoryService.getWorkspace(pos.getRepo(), pos.getCommit()).toPath();
+        RefLocations ret = symbolService.localRefs(root, pos);
         Collection<Range> refs = new LinkedList<>();
         for (Range range : ret.getRefs()) {
             Range copy = new Range(range);
@@ -81,14 +83,16 @@ public class LanguageProcessorController {
 
     @PostMapping(value = "/external-refs")
     public ExternalRefs externalRefs(@Valid @RequestBody RepoRev repoRev)
-            throws WorkspaceException, SymbolException {
-        return symbolService.externalRefs(repoRev);
+            throws WorkspaceException, WorkspaceBeingPreparedException, SymbolException {
+        Path root = repositoryService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
+        return symbolService.externalRefs(root);
     }
 
     @PostMapping(value = "/exported-symbols")
     public ExportedSymbols exportedSymbols(@Valid @RequestBody RepoRev repoRev)
-            throws WorkspaceException, SymbolException {
-        return symbolService.exportedSymbols(repoRev);
+            throws WorkspaceException, WorkspaceBeingPreparedException, SymbolException {
+        Path root = repositoryService.getWorkspace(repoRev.getRepo(), repoRev.getCommit()).toPath();
+        return symbolService.exportedSymbols(root);
     }
 
     @PostMapping(value = "/defspec-to-position")

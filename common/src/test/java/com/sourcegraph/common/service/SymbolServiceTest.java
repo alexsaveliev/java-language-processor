@@ -164,7 +164,7 @@ public class SymbolServiceTest {
         position.setFile("src/main/java/mypkg/FooClass.java");
         position.setLine(14);
         position.setCharacter(19);
-        RefLocations refs = symbolService.localRefs(position);
+        RefLocations refs = symbolService.localRefs(repoRoot.toPath(), position);
         assertNotNull(refs);
         Collection<Range> expected = new ObjectMapper().
                 readValue(this.getClass().getResourceAsStream("/data/local-refs.json"),
@@ -184,7 +184,7 @@ public class SymbolServiceTest {
         RepoRev repoRev = new RepoRev();
         repoRev.setRepo("github.com/sgtest/java-maven-sample");
         repoRev.setCommit("e6e1dca05be97bba8cd9ea5b828191c5c6d2b9db");
-        ExternalRefs refs = symbolService.externalRefs(repoRev);
+        ExternalRefs refs = symbolService.externalRefs(repoRoot.toPath());
         assertNotNull(refs);
         Collection<DefSpec> expected = new ObjectMapper().
                 readValue(this.getClass().getResourceAsStream("/data/external-refs.json"),

@@ -1,7 +1,7 @@
 package com.sourcegraph.lsp.service;
 
 import com.sourcegraph.lsp.LanguageServer;
-import com.sourcegraph.lsp.SafeCheckAliveLanguageServerEndpoint;
+import com.sourcegraph.lsp.NoCheckAliveLanguageServerEndpoint;
 import io.typefox.lsapi.services.json.MessageJsonHandler;
 import io.typefox.lsapi.services.json.StreamMessageReader;
 import io.typefox.lsapi.services.json.StreamMessageWriter;
@@ -90,7 +90,7 @@ public class Server {
             OutputStream out = Channels.newOutputStream(channel);
             StreamMessageWriter writer = new StreamMessageWriter(out, jsonHandler);
 
-            new SafeCheckAliveLanguageServerEndpoint(languageServer, executorService).connect(concurrentReader, writer);
+            new NoCheckAliveLanguageServerEndpoint(languageServer, executorService).connect(concurrentReader, writer);
             concurrentReader.join();
             try {
                 channel.close();
